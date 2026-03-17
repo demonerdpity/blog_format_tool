@@ -1,0 +1,15 @@
+node_modules/
+dist/
+
+# Tauri / Rust
+src-tauri/target/
+
+# Logs
+*.log
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
