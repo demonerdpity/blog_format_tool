@@ -13,7 +13,8 @@ use crate::models::{
   AnalyzeResult, AppConfig, ConvertReport, FileNameStrategy, ImageCounts, ImageOp, MetaOptions, OutputType,
 };
 use crate::utils::{
-  is_remote_url, is_site_images_path, resolve_under_repo, safe_file_name, safe_url_segment, split_file_name,
+  is_remote_url, is_site_images_path, relative_markdown_path, resolve_under_repo, safe_file_name, safe_url_segment,
+  split_file_name,
 };
 
 #[derive(Debug, Clone)]
@@ -26,7 +27,6 @@ struct ParsedMarkdown {
 struct ImageResolved {
   source_path: PathBuf,
   final_path: PathBuf,
-  final_site_name: String,
   action: String,
 }
 
@@ -245,6 +245,30 @@ fn compute_output_md_path(config: &AppConfig, output_type: OutputType, source_md
   Ok(out_dir.join(file_name))
 }
 
+fn duplicate_output_warning(output_md_path: &Path, source_md: &Path) -> Option<String> {
+  if !output_md_path.exists() {
+    return None;
+  }
+
+  let existing = output_md_path.canonicalize().ok();
+  let source = source_md.canonicalize().ok();
+  if existing.is_some() && existing == source {
+    return None;
+  }
+
+  Some(format!(
+    "目标文章已存在，可能是重复文章：{}",
+    output_md_path.display()
+  ))
+}
+
+fn ensure_output_target_available(output_md_path: &Path, source_md: &Path) -> AppResult<()> {
+  if let Some(message) = duplicate_output_warning(output_md_path, source_md) {
+    return Err(AppError::Message(message));
+  }
+  Ok(())
+}
+
 fn copy_or_reuse_image(dest_dir: &Path, src_abs: &Path) -> AppResult<ImageResolved> {
   let src_name = src_abs
     .file_name()
@@ -261,7 +285,6 @@ fn copy_or_reuse_image(dest_dir: &Path, src_abs: &Path) -> AppResult<ImageResolv
       return Ok(ImageResolved {
         source_path: src_abs.to_path_buf(),
         final_path: candidate,
-        final_site_name: safe_name,
         action: "skippedSame".to_string(),
       });
     }
@@ -277,7 +300,6 @@ fn copy_or_reuse_image(dest_dir: &Path, src_abs: &Path) -> AppResult<ImageResolv
           return Ok(ImageResolved {
             source_path: src_abs.to_path_buf(),
             final_path: renamed_path,
-            final_site_name: renamed,
             action: "skippedSame".to_string(),
           });
         }
@@ -287,7 +309,6 @@ fn copy_or_reuse_image(dest_dir: &Path, src_abs: &Path) -> AppResult<ImageResolv
       return Ok(ImageResolved {
         source_path: src_abs.to_path_buf(),
         final_path: renamed_path,
-        final_site_name: renamed,
         action: "renamedCopied".to_string(),
       });
     }
@@ -301,7 +322,6 @@ fn copy_or_reuse_image(dest_dir: &Path, src_abs: &Path) -> AppResult<ImageResolv
   Ok(ImageResolved {
     source_path: src_abs.to_path_buf(),
     final_path: candidate,
-    final_site_name: safe_name,
     action: "copied".to_string(),
   })
 }
@@ -358,8 +378,8 @@ fn parse_md_image_inner(inner: &str) -> (String, String, bool) {
 fn process_images_in_body(
   body: &str,
   md_dir: &Path,
+  output_md_dir: &Path,
   images_target_dir: &Path,
-  safe_title: &str,
   warnings: &mut Vec<String>,
   perform_copy_and_rewrite: bool,
 ) -> AppResult<(String, Vec<ImageResolved>, ImageCounts)> {
@@ -443,8 +463,12 @@ fn process_images_in_body(
               }
             };
 
-            let site_path = format!("/images/{}/{}", safe_title, resolved.final_site_name);
-            let new_dest = if wrapped { format!("<{}>", site_path) } else { site_path };
+            let relative_path = relative_markdown_path(output_md_dir, &resolved.final_path);
+            let new_dest = if wrapped {
+              format!("<{}>", relative_path)
+            } else {
+              relative_path
+            };
             format!("![{}]({}{})", alt, new_dest, rest)
           }
           Err(e) => {
@@ -494,8 +518,8 @@ fn process_images_in_body(
                 }
               }
             };
-            let site_path = format!("/images/{}/{}", safe_title, resolved.final_site_name);
-            format!("{}{}{}", prefix, site_path, suffix)
+            let relative_path = relative_markdown_path(output_md_dir, &resolved.final_path);
+            format!("{}{}{}", prefix, relative_path, suffix)
           }
           Err(e) => {
             warnings.push(e.to_string());
@@ -536,22 +560,27 @@ pub fn analyze_file(md_path: &str, output_type_raw: &str, config: &AppConfig) ->
     }
   };
   let safe_title = safe_url_segment(&title, 80);
+  let output_md_path = compute_output_md_path(config, output_type, &md_path, &title)?;
+  let output_md_dir = output_md_path
+    .parent()
+    .ok_or_else(|| AppError::Message("无法读取输出 Markdown 所在目录".to_string()))?;
 
   let repo_root = ensure_repo_root(config)?;
   let images_root = resolve_under_repo(&repo_root, &config.images_dir);
   let images_target_dir = images_root.join(&safe_title);
 
   let mut warnings: Vec<String> = Vec::new();
+  if let Some(message) = duplicate_output_warning(&output_md_path, &md_path) {
+    warnings.push(message);
+  }
   let (_, _, counts) = process_images_in_body(
     &body_wo_h1,
     md_dir,
+    output_md_dir,
     &images_target_dir,
-    &safe_title,
     &mut warnings,
     false,
   )?;
-
-  let output_md_path = compute_output_md_path(config, output_type, &md_path, &title)?;
 
   Ok(AnalyzeResult {
     title: Some(title),
@@ -592,6 +621,11 @@ pub fn convert_file(
 
   let safe_title = safe_url_segment(&title, 80);
   let today = now_date_string(&config.date_format);
+  let output_md_path = compute_output_md_path(config, output_type, &md_path, &title)?;
+  let output_md_dir = output_md_path
+    .parent()
+    .ok_or_else(|| AppError::Message("无法读取输出 Markdown 所在目录".to_string()))?;
+  ensure_output_target_available(&output_md_path, &md_path)?;
 
   let pub_date_current = get_string(&fm, "pubDate");
   let should_set_pub = match pub_date_current.as_deref() {
@@ -644,7 +678,7 @@ pub fn convert_file(
 
   let mut warnings: Vec<String> = Vec::new();
   let (rewritten_body, images_resolved, _) =
-    process_images_in_body(&body_wo_h1, md_dir, &images_target_dir, &safe_title, &mut warnings, true)?;
+    process_images_in_body(&body_wo_h1, md_dir, output_md_dir, &images_target_dir, &mut warnings, true)?;
 
   let mut hero_op: Option<ImageResolved> = None;
   if meta.hero_image_override {
@@ -657,14 +691,13 @@ pub fn convert_file(
     } else {
       let abs = resolve_local_image(md_dir, hero_path)?;
       let resolved = copy_or_reuse_image(&images_target_dir, &abs)?;
-      let site_path = format!("/images/{}/{}", safe_title, resolved.final_site_name);
-      set_string(&mut fm, "heroImage", site_path);
+      let relative_path = relative_markdown_path(output_md_dir, &resolved.final_path);
+      set_string(&mut fm, "heroImage", relative_path);
       hero_op = Some(resolved);
     }
   }
 
   let fm_text = mapping_to_frontmatter_text(&fm)?;
-  let output_md_path = compute_output_md_path(config, output_type, &md_path, &title)?;
   if let Some(parent) = output_md_path.parent() {
     fs::create_dir_all(parent)?;
   }
@@ -678,7 +711,7 @@ pub fn convert_file(
     .map(|img| ImageOp {
       source_path: img.source_path.to_string_lossy().to_string(),
       final_path: img.final_path.to_string_lossy().to_string(),
-      final_site_path: format!("/images/{}/{}", safe_title, img.final_site_name),
+      final_site_path: relative_markdown_path(output_md_dir, &img.final_path),
       action: img.action,
     })
     .collect();
@@ -687,7 +720,7 @@ pub fn convert_file(
     ops.push(ImageOp {
       source_path: hero.source_path.to_string_lossy().to_string(),
       final_path: hero.final_path.to_string_lossy().to_string(),
-      final_site_path: format!("/images/{}/{}", safe_title, hero.final_site_name),
+      final_site_path: relative_markdown_path(output_md_dir, &hero.final_path),
       action: hero.action,
     });
   }
@@ -759,7 +792,7 @@ mod tests {
 
     let out_md = fs::read_to_string(&output_path)?;
     assert!(!out_md.contains("# Hello World"));
-    assert!(out_md.contains("/images/Hello-World/a.png"));
+    assert!(out_md.contains("../../../public/images/Hello-World/a.png"));
 
     let fm = parse_frontmatter(&out_md);
     assert_eq!(get_string(&fm, "title").as_deref(), Some("Hello World"));
@@ -815,5 +848,33 @@ Hello.\n",
     let fm = parse_frontmatter(&out_md);
     assert!(fm.get(&frontmatter_key("tags")).is_none());
     Ok(())
+  }
+
+  #[test]
+  fn convert_rejects_duplicate_output_path() {
+    let repo = tempfile::tempdir().expect("repo tempdir");
+    let source = tempfile::tempdir().expect("source tempdir");
+
+    fs::create_dir_all(repo.path().join("src/content/blog")).expect("mkdir blog");
+    fs::create_dir_all(repo.path().join("public/images")).expect("mkdir images");
+    fs::write(repo.path().join("src/content/blog/post.md"), "existing").expect("write existing post");
+
+    let md_path = source.path().join("post.md");
+    fs::write(&md_path, "# Same Name\n\nBody.\n").expect("write md");
+
+    let mut config = AppConfig::default();
+    config.repo_root = repo.path().to_string_lossy().to_string();
+
+    let meta = MetaOptions {
+      description_override: false,
+      description: String::new(),
+      tags_override: false,
+      tags: vec![],
+      hero_image_override: false,
+      hero_image_path: None,
+    };
+
+    let error = convert_file(&md_path.to_string_lossy(), "blog", &config, &meta).expect_err("duplicate should fail");
+    assert!(error.to_string().contains("目标文章已存在"));
   }
 }

@@ -1,51 +1,60 @@
 # Blog Format Tool
 
-把「普通 Markdown + 本地图片引用」一键转换为可直接放进你的 Astro 内容仓库的文章文件（blog / essays），并自动复制图片到 `public/images/`，同时把 Markdown 内图片引用改写为站点绝对路径 `/images/...`。
+一个基于 `Tauri 2 + Vite + TypeScript + Rust` 的本地托盘工具，用来把普通 Markdown 和本地图片整理成可直接放进 Astro 内容仓库的文章文件。
 
-## 功能（MVP）
-- YAML frontmatter：读取/生成，保留未知字段
-- title：从正文首个 `# H1` 自动读取，并从正文删除该行
-- pubDate：缺失/不可解析才补全；已有则保持不变
-- updatedDate：每次转换都覆盖为当前日期（默认格式 `%Y-%m-%d`）
-- description（必填）：优先保留；勾选覆盖则用输入；否则自动生成首段纯文本摘要（默认截断 80 字符）
-- tags：仅 blog 支持写入；essays 会自动移除 `tags`
-- 图片：复制到 `<repoRoot>/public/images/<safeTitle>/`，并把引用改写为 `/images/<safeTitle>/<file>`
+现在它不再只是“网页端页面”，而是一个本地桌面程序：
 
-## 使用
-1. 在 UI 里选择你的博客仓库根目录（`repoRoot`）
-2. 选择要转换的 Markdown 文件（单文件）
-3. 选择输出类型：`blog` 或 `essays`
-4. （可选）勾选覆盖 description / 写入 tags / 选择 heroImage
-5. 点击「开始转换」
+- 主窗口用于配置、预览和执行转换
+- 点击右上角“隐藏到托盘”可以收起到系统托盘
+- 关闭窗口不会退出程序，会继续驻留在后台托盘
+- 托盘菜单支持重新显示窗口、隐藏窗口和退出程序
 
-输出位置（默认）：
-- blog：`<repoRoot>/src/content/blog/`
-- essays：`<repoRoot>/src/content/essays/`
-- images：`<repoRoot>/public/images/`
+## 功能
 
-## 配置文件
-配置存储为 `config.toml`（路径会在 UI 右侧显示）。可配置项（camelCase）：
+- 读取并保留 YAML frontmatter 中的已有字段
+- 从正文首个 `# H1` 自动提取标题，并从正文中移除该 H1
+- `pubDate` 缺失或不可解析时自动补齐
+- `updatedDate` 每次转换都会刷新
+- `description` 优先保留原值；也支持手动覆盖；缺失时从正文首段自动生成
+- `tags` 仅在 `blog` 模式写入；`essays` 模式会自动移除
+- 本地图片会复制到 `<repoRoot>/public/images/<safeTitle>/`
+- Markdown 中的本地图片引用会被改写为 `/images/<safeTitle>/<file>`
+- `heroImage` 支持单独选择并一并复制/改写
+
+## 本地配置
+
+配置文件保存在系统应用配置目录下的 `config.toml`，程序界面里会直接显示实际路径。
+
+当前支持的配置项：
+
 - `repoRoot`
-- `blogContentDir`（默认 `src/content/blog`）
-- `essaysContentDir`（默认 `src/content/essays`）
-- `imagesDir`（默认 `public/images`）
-- `dateFormat`（默认 `%Y-%m-%d`）
-- `descriptionAutoLength`（默认 `80`）
-- `fileNameStrategy`（默认 `original`；可选 `titleSlug`）
+- `blogContentDir`
+- `essaysContentDir`
+- `imagesDir`
+- `dateFormat`
+- `descriptionAutoLength`
+- `fileNameStrategy`
 
-## Dev
-### Windows 依赖（必须）
-- Rust（提供 `cargo`）：确认 `cargo --version` 有输出（或 `C:\Users\<you>\.cargo\bin\cargo.exe --version`）
-- C++ 构建工具：安装 Visual Studio 2022 Build Tools（勾选「Desktop development with C++」+ Windows SDK）
+固定策略：
 
-> 如果你遇到 `cargo metadata ... program not found`，通常是 `cargo` 没在 PATH。此项目的 `npm run tauri ...` 会自动尝试把 `%USERPROFILE%\.cargo\bin` 加入 PATH。
+- `imageSubdirStrategy = "title"`
+- `copyMode = "copy"`
+
+兼容性处理：
+
+- 即使旧版 `config.toml` 缺少部分字段，也会自动补默认值，不会因为少字段直接报废
+
+## 开发
 
 ```bash
 npm install
 npm run tauri dev
 ```
 
-## Build
+如果本机 `cargo` 没在 PATH 中，`scripts/tauri.mjs` 会优先尝试把默认的 Cargo 安装目录补进 PATH。
+
+## 构建
+
 ```bash
 npm run tauri build
 ```

@@ -15,8 +15,11 @@
       {
         "label": "main",
         "title": "Blog Format Tool",
-        "width": 980,
-        "height": 760,
+        "width": 1140,
+        "height": 860,
+        "minWidth": 920,
+        "minHeight": 720,
+        "center": true,
         "resizable": true
       }
     ],

@@ -27,6 +27,7 @@ pub enum FileNameStrategy {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 #[serde(rename_all = "camelCase")]
 pub struct AppConfig {
   pub repo_root: String,
@@ -127,3 +128,28 @@ pub struct ConvertReport {
   pub warnings: Vec<String>,
 }
 
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn app_config_uses_defaults_for_missing_fields() {
+    let config: AppConfig = toml::from_str(
+      r#"
+repoRoot = "C:\\blog"
+imagesDir = "assets/images"
+"#,
+    )
+    .expect("config should deserialize");
+
+    assert_eq!(config.repo_root, "C:\\blog");
+    assert_eq!(config.blog_content_dir, "src/content/blog");
+    assert_eq!(config.essays_content_dir, "src/content/essays");
+    assert_eq!(config.images_dir, "assets/images");
+    assert_eq!(config.date_format, "%Y-%m-%d");
+    assert_eq!(config.description_auto_length, 80);
+    assert!(matches!(config.file_name_strategy, FileNameStrategy::Original));
+    assert!(matches!(config.image_subdir_strategy, ImageSubdirStrategy::Title));
+    assert!(matches!(config.copy_mode, CopyMode::Copy));
+  }
+}
