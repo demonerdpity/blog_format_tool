@@ -81,54 +81,54 @@ function render(app: HTMLElement) {
   app.innerHTML = `
     <div class="shell">
       <header class="topbar">
-        <div class="topbar-left">
-          <button id="openSettings" class="ghost-button" type="button">
-            <span class="gear-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
-                <path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.2 7.2 0 0 0-1.62-.94l-.36-2.54a.5.5 0 0 0-.49-.42h-3.84a.5.5 0 0 0-.49.42l-.36 2.54a7.2 7.2 0 0 0-1.62.94l-2.39-.96a.5.5 0 0 0-.6.22L2.7 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94L2.82 14.52a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.31.6.22l2.39-.96c.5.39 1.04.7 1.62.94l.36 2.54c.04.24.25.42.49.42h3.84c.24 0 .45-.18.49-.42l.36-2.54c.58-.24 1.12-.55 1.62-.94l2.39.96c.22.09.47 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58ZM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7Z"></path>
-              </svg>
-            </span>
-            <span>设置</span>
-          </button>
-          <div class="brand">
-            <div class="brand-mark" aria-hidden="true">
-              <span class="brand-shadow"></span>
-              <span class="brand-core"></span>
-              <span class="brand-ribbon ribbon-one"></span>
-              <span class="brand-ribbon ribbon-two"></span>
-              <span class="brand-ribbon ribbon-three"></span>
-            </div>
-            <div>
-              <div class="eyebrow">Markdown Workflow</div>
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">
+            <span class="brand-shadow"></span>
+            <span class="brand-core"></span>
+            <span class="brand-ribbon ribbon-one"></span>
+            <span class="brand-ribbon ribbon-two"></span>
+            <span class="brand-ribbon ribbon-three"></span>
+          </div>
+          <div class="brand-copy">
+            <div class="brand-row">
               <h1>Blog Format Tool</h1>
+              <div class="eyebrow">Markdown Workflow</div>
             </div>
+            <p class="brand-subtitle">把普通 Markdown 和本地图片快速整理成 Astro 可直接使用的内容文件。</p>
           </div>
         </div>
-        <div class="topbar-spacer"></div>
+        <button id="openSettings" class="ghost-button square-button" type="button" aria-label="打开设置" title="设置">
+          <span class="gear-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+              <path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.2 7.2 0 0 0-1.62-.94l-.36-2.54a.5.5 0 0 0-.49-.42h-3.84a.5.5 0 0 0-.49.42l-.36 2.54a7.2 7.2 0 0 0-1.62.94l-2.39-.96a.5.5 0 0 0-.6.22L2.7 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94L2.82 14.52a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.31.6.22l2.39-.96c.5.39 1.04.7 1.62.94l.36 2.54c.04.24.25.42.49.42h3.84c.24 0 .45-.18.49-.42l.36-2.54c.58-.24 1.12-.55 1.62-.94l2.39.96c.22.09.47 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58ZM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7Z"></path>
+            </svg>
+          </span>
+        </button>
       </header>
 
       <section class="hero panel">
         <div class="hero-main">
           <h2>Markdown 与图片一键整理</h2>
           <p class="hero-copy">
-            把普通 Markdown 整理成可直接放进 Astro 的 blog / essays 内容文件，省掉 frontmatter、图片搬运和路径改写的重复劳动。
+            把普通 Markdown 整理成可直接放进 Astro 的 blog / essays 内容文件，省去 frontmatter、图片搬运和路径改写的重复操作。
           </p>
         </div>
         <div class="hero-note">
           <div class="hero-note-title">默认处理规则</div>
           <p>
-            自动读取首个 H1 作为标题并从正文移除，缺失的 <code>pubDate</code> 会补全、<code>updatedDate</code> 每次更新，本地图片会复制到
-            <code>public/images/&lt;title&gt;/</code> 并改写为 <code>/images/...</code>，源 Markdown 和源图片都保持不动。
+            自动读取首个 H1 作为标题并从正文移除；缺失的 <code>pubDate</code> 会补全，<code>updatedDate</code>
+            每次都会更新；本地图片会复制到 <code>public/images/&lt;title&gt;/</code>，并改写为
+            <code>/images/...</code>。
           </p>
         </div>
       </section>
 
       <div class="workspace-grid">
-        <section class="panel">
+        <section class="panel content-panel">
           <div class="panel-head">
             <div>
               <h2>转换内容</h2>
-              <p>选择 Markdown 文件，决定输出到 blog 或 essays，并按需补充描述、标签和 heroImage。</p>
+              <p>选择 Markdown 文件，决定输出到 blog 或 essays，并按需补充 description、tags 和 heroImage。</p>
             </div>
           </div>
 
@@ -158,7 +158,7 @@ function render(app: HTMLElement) {
             <div class="stack-field" id="tagsRow">
               <label class="checkbox-line">
                 <input id="tagsOverride" type="checkbox" />
-                <span>仅 blog 模式可用。点击加号添加 tag，下面会保留当前已添加的所有标签。</span>
+                <span>仅 blog 模式可用。输入单个 tag 后点击加号或回车，下方会保留当前所有标签。</span>
               </label>
               <div class="tag-editor" id="tagEditor">
                 <div class="tag-input-row">
@@ -173,7 +173,7 @@ function render(app: HTMLElement) {
             <div class="stack-field">
               <label class="checkbox-line">
                 <input id="heroOverride" type="checkbox" />
-                <span>勾选后选择 heroImage，并按相同规则复制和改写路径。</span>
+                <span>勾选后选择 heroImage，并按同样规则复制和改写路径。</span>
               </label>
               <div class="field-with-button">
                 <input id="heroPath" type="text" placeholder="可留空" disabled />
@@ -193,7 +193,7 @@ function render(app: HTMLElement) {
           <div class="panel-head compact">
             <div>
               <h2>状态与输出</h2>
-              <p>这里会显示解析结果、目标路径和转换过程中的警告信息。</p>
+              <p>这里会展示解析结果、目标路径和转换过程中的警告信息。</p>
             </div>
           </div>
 
@@ -215,7 +215,7 @@ function render(app: HTMLElement) {
           <div class="preview-card info-card">
             <div class="preview-label">当前会自动处理</div>
             <ul class="rule-list">
-              <li>首个 H1 自动写入 title，并从正文中删除</li>
+              <li>首个 H1 自动写入 title，并从正文中移除</li>
               <li>缺失 pubDate 自动补全，updatedDate 每次覆盖</li>
               <li>本地图片复制到图片目录，引用统一改成 <code>/images/...</code></li>
             </ul>
@@ -239,7 +239,7 @@ function render(app: HTMLElement) {
             <div>
               <div class="eyebrow">Local Config</div>
               <h2 id="settingsTitle">设置</h2>
-              <p>这里保留本地仓库路径和转换策略。保存后会写入系统配置目录，下次打开仍会沿用。</p>
+              <p>这里保存本地仓库路径和转换策略。保存后会写入系统配置目录，下次打开依然沿用。</p>
             </div>
             <button id="closeSettings" class="close-button" type="button" aria-label="关闭设置">
               <span aria-hidden="true">×</span>
@@ -411,13 +411,13 @@ function setConvertButtonPhase(phase: ActionPhase) {
   }
 }
 
-function setSettingsOpen(open: boolean) {
+function setSettingsOpen(openState: boolean) {
   const modal = getEl<HTMLDivElement>("#settingsModal");
-  modal.classList.toggle("hidden", !open);
-  modal.setAttribute("aria-hidden", String(!open));
-  document.body.classList.toggle("modal-open", open);
+  modal.classList.toggle("hidden", !openState);
+  modal.setAttribute("aria-hidden", String(!openState));
+  document.body.classList.toggle("modal-open", openState);
 
-  if (open) {
+  if (openState) {
     getEl<HTMLInputElement>("#repoRoot").focus();
   }
 }
@@ -507,7 +507,7 @@ async function analyze() {
     })) as AnalyzeResult;
 
     state.lastAnalyze = result;
-    setStatus(result.warnings.length ? "warn" : "ok", result.warnings.length ? "解析完成，有警告" : "解析完成");
+    setStatus(result.warnings.length ? "warn" : "ok", result.warnings.length ? "解析完成，存在警告" : "解析完成");
     setImagePill(result.imageCounts);
     setPreview(result);
 
@@ -568,8 +568,8 @@ async function convert() {
       }
     }
 
-    setConvertButtonPhase(result.warnings.length ? "error" : "success");
-    setStatus(result.warnings.length ? "warn" : "ok", result.warnings.length ? "转换完成，有警告" : "转换完成");
+    setConvertButtonPhase("success");
+    setStatus(result.warnings.length ? "warn" : "ok", result.warnings.length ? "转换完成，存在警告" : "转换完成");
     reportText(lines.join("\n"));
     await analyze();
   } catch (error) {
