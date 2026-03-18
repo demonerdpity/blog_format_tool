@@ -38,20 +38,45 @@ fn convert_markdown(request: ConvertRequest) -> Result<blog_format_tool_lib::mod
 fn tray_icon_image() -> Image<'static> {
   let size = 32usize;
   let mut rgba = vec![0u8; size * size * 4];
+  let radius = 7.0f32;
+
+  let inside_rounded_rect = |x: usize, y: usize| {
+    let left = 3.0f32;
+    let top = 3.0f32;
+    let right = (size as f32) - 4.0;
+    let bottom = (size as f32) - 4.0;
+    let px = x as f32 + 0.5;
+    let py = y as f32 + 0.5;
+
+    let closest_x = px.clamp(left + radius, right - radius);
+    let closest_y = py.clamp(top + radius, bottom - radius);
+    let dx = px - closest_x;
+    let dy = py - closest_y;
+    dx * dx + dy * dy <= radius * radius
+  };
 
   for y in 0..size {
     for x in 0..size {
       let idx = (y * size + x) * 4;
-      let is_border = x < 2 || y < 2 || x >= size - 2 || y >= size - 2;
-      let is_stripe = (8..=23).contains(&x) && (8..=23).contains(&y);
-      let is_cutout = (12..=19).contains(&x) && (12..=19).contains(&y);
+      if !inside_rounded_rect(x, y) {
+        rgba[idx..idx + 4].copy_from_slice(&[0, 0, 0, 0]);
+        continue;
+      }
 
-      let pixel = if is_border {
-        [15, 23, 42, 255]
-      } else if is_stripe && !is_cutout {
-        [244, 247, 255, 255]
+      let mix = ((x as f32 / (size - 1) as f32) * 0.6) + ((1.0 - y as f32 / (size - 1) as f32) * 0.4);
+      let mix = mix.clamp(0.0, 1.0);
+      let red = (15.0 + (24.0 - 15.0) * mix) as u8;
+      let green = (110.0 + (160.0 - 110.0) * mix) as u8;
+      let blue = (248.0 + (182.0 - 248.0) * mix) as u8;
+
+      let in_ribbon = ((9..=13).contains(&y) && (9..=22).contains(&x))
+        || ((15..=19).contains(&y) && (11..=20).contains(&x))
+        || ((21..=24).contains(&y) && (13..=18).contains(&x));
+
+      let pixel = if in_ribbon {
+        [245, 250, 255, 255]
       } else {
-        [46, 125, 255, 255]
+        [red, green, blue, 255]
       };
 
       rgba[idx..idx + 4].copy_from_slice(&pixel);

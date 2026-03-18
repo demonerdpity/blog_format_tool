@@ -1,5 +1,9 @@
 import { defineConfig } from "vite";
 
+declare const process: {
+  env: Record<string, string | undefined>;
+};
+
 const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig({
@@ -14,4 +18,3 @@ export default defineConfig({
     },
   },
 });
-

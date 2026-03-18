@@ -15,10 +15,10 @@
       {
         "label": "main",
         "title": "Blog Format Tool",
-        "width": 1140,
-        "height": 860,
-        "minWidth": 920,
-        "minHeight": 720,
+        "width": 960,
+        "height": 720,
+        "minWidth": 820,
+        "minHeight": 620,
         "center": true,
         "resizable": true
       }

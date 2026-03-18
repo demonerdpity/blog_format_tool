@@ -1,6 +1,5 @@
 import "./style.css";
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { open } from "@tauri-apps/plugin-dialog";
 
 type OutputType = "blog" | "essays";
@@ -60,11 +59,10 @@ const DEFAULT_CONFIG: AppConfig = {
   fileNameStrategy: "original",
 };
 
-const trayWindow = getCurrentWebviewWindow();
-
 const state = {
   lastAnalyze: null as AnalyzeResult | null,
   convertResetTimer: null as number | null,
+  tags: [] as string[],
 };
 
 function getEl<T extends HTMLElement>(selector: string): T {
@@ -82,45 +80,68 @@ function escapeHtml(value: string) {
 function render(app: HTMLElement) {
   app.innerHTML = `
     <div class="shell">
-      <header class="hero">
-        <div>
-          <div class="eyebrow">Tauri Local Tray App</div>
-          <h1>Blog Format Tool</h1>
+      <header class="topbar">
+        <div class="topbar-left">
+          <button id="openSettings" class="ghost-button" type="button">
+            <span class="gear-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                <path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.2 7.2 0 0 0-1.62-.94l-.36-2.54a.5.5 0 0 0-.49-.42h-3.84a.5.5 0 0 0-.49.42l-.36 2.54a7.2 7.2 0 0 0-1.62.94l-2.39-.96a.5.5 0 0 0-.6.22L2.7 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94L2.82 14.52a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.31.6.22l2.39-.96c.5.39 1.04.7 1.62.94l.36 2.54c.04.24.25.42.49.42h3.84c.24 0 .45-.18.49-.42l.36-2.54c.58-.24 1.12-.55 1.62-.94l2.39.96c.22.09.47 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58ZM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7Z"></path>
+              </svg>
+            </span>
+            <span>设置</span>
+          </button>
+          <div class="brand">
+            <div class="brand-mark" aria-hidden="true">
+              <span class="brand-shadow"></span>
+              <span class="brand-core"></span>
+              <span class="brand-ribbon ribbon-one"></span>
+              <span class="brand-ribbon ribbon-two"></span>
+              <span class="brand-ribbon ribbon-three"></span>
+            </div>
+            <div>
+              <div class="eyebrow">Markdown Workflow</div>
+              <h1>Blog Format Tool</h1>
+            </div>
+          </div>
+        </div>
+        <div class="topbar-spacer"></div>
+      </header>
+
+      <section class="hero panel">
+        <div class="hero-main">
+          <h2>Markdown 与图片一键整理</h2>
           <p class="hero-copy">
-            把 Markdown 和本地图片整理成可直接放进 Astro 仓库的文章文件。关闭窗口后程序不会退出，会继续驻留在系统托盘里。
+            把普通 Markdown 整理成可直接放进 Astro 的 blog / essays 内容文件，省掉 frontmatter、图片搬运和路径改写的重复劳动。
           </p>
         </div>
-        <div class="hero-actions">
-          <span class="pill subtle">图片会改写为相对文章的路径</span>
-          <button id="hideToTray">隐藏到托盘</button>
+        <div class="hero-note">
+          <div class="hero-note-title">默认处理规则</div>
+          <p>
+            自动读取首个 H1 作为标题并从正文移除，缺失的 <code>pubDate</code> 会补全、<code>updatedDate</code> 每次更新，本地图片会复制到
+            <code>public/images/&lt;title&gt;/</code> 并改写为 <code>/images/...</code>，源 Markdown 和源图片都保持不动。
+          </p>
         </div>
-      </header>
+      </section>
 
       <div class="workspace-grid">
         <section class="panel">
           <div class="panel-head">
             <div>
-              <h2>工作区</h2>
-              <p>选择仓库和 Markdown 文件，生成 blog 或 essays 文章。</p>
+              <h2>转换内容</h2>
+              <p>选择 Markdown 文件，决定输出到 blog 或 essays，并按需补充描述、标签和 heroImage。</p>
             </div>
           </div>
 
           <div class="form-grid">
-            <label for="repoRoot">博客仓库根目录</label>
-            <div class="field-with-button">
-              <input id="repoRoot" type="text" placeholder="例如：C:\\Users\\admin\\work\\blog" />
-              <button id="pickRepoRoot">选择</button>
-            </div>
-
             <label for="mdPath">Markdown 文件</label>
             <div class="field-with-button">
-              <input id="mdPath" type="text" placeholder="选择单个 .md 或 .mdx 文件" />
-              <button id="pickMd">选择</button>
+              <input id="mdPath" type="text" placeholder="选择单个 .md / .mdx 文件" />
+              <button id="pickMd" type="button">选择</button>
             </div>
 
             <label for="outputType">输出类型</label>
             <select id="outputType">
-              <option value="blog">博客文章（blog）</option>
+              <option value="blog">博文（blog）</option>
               <option value="essays">随笔（essays）</option>
             </select>
 
@@ -128,45 +149,51 @@ function render(app: HTMLElement) {
             <div class="stack-field">
               <label class="checkbox-line">
                 <input id="descOverride" type="checkbox" />
-                勾选后使用下面的内容；不勾选时优先保留原 description，缺失时自动生成。
+                <span>勾选后使用手动输入；不勾选时优先保留原 description，缺失时自动生成。</span>
               </label>
-              <textarea id="descInput" placeholder="留空则尝试从正文首段自动生成摘要" disabled></textarea>
+              <textarea id="descInput" placeholder="留空时会尝试从正文首段自动生成摘要" disabled></textarea>
             </div>
 
-            <label id="tagsLabel" for="tagsInput">写入 tags</label>
+            <label id="tagsLabel" for="tagInput">写入 tags</label>
             <div class="stack-field" id="tagsRow">
               <label class="checkbox-line">
                 <input id="tagsOverride" type="checkbox" />
-                仅 blog 模式生效，支持用英文逗号分隔多个标签。
+                <span>仅 blog 模式可用。点击加号添加 tag，下面会保留当前已添加的所有标签。</span>
               </label>
-              <input id="tagsInput" type="text" placeholder="例如：Astro, Rust, Tauri" disabled />
+              <div class="tag-editor" id="tagEditor">
+                <div class="tag-input-row">
+                  <input id="tagInput" type="text" placeholder="输入 tag 后点击加号" disabled />
+                  <button id="addTag" class="icon-action" type="button" disabled aria-label="添加 tag">+</button>
+                </div>
+                <div class="tag-list" id="tagList"></div>
+              </div>
             </div>
 
             <label for="heroPath">heroImage</label>
             <div class="stack-field">
               <label class="checkbox-line">
                 <input id="heroOverride" type="checkbox" />
-                勾选后会将 heroImage 一并复制并改写为相对路径。
+                <span>勾选后选择 heroImage，并按相同规则复制和改写路径。</span>
               </label>
               <div class="field-with-button">
                 <input id="heroPath" type="text" placeholder="可留空" disabled />
-                <button id="pickHero" disabled>选择</button>
+                <button id="pickHero" type="button" disabled>选择</button>
               </div>
             </div>
           </div>
 
           <div class="toolbar">
-            <button id="analyzeBtn">解析预览</button>
-            <button class="primary action-button" id="convertBtn" data-phase="idle">开始转换</button>
-            <button id="copyReport">复制报告</button>
+            <button id="analyzeBtn" type="button">解析预览</button>
+            <button class="primary action-button" id="convertBtn" type="button" data-phase="idle">开始转换</button>
+            <button id="copyReport" type="button">复制报告</button>
           </div>
         </section>
 
-        <section class="panel">
-          <div class="panel-head">
+        <section class="panel side-panel">
+          <div class="panel-head compact">
             <div>
               <h2>状态与输出</h2>
-              <p>如果发现同名文章，解析阶段会先给告警，转换阶段会直接拦截。</p>
+              <p>这里会显示解析结果、目标路径和转换过程中的警告信息。</p>
             </div>
           </div>
 
@@ -185,62 +212,78 @@ function render(app: HTMLElement) {
             <div class="preview-value" id="outputPreview">尚未生成</div>
           </div>
 
-          <div class="preview-card">
-            <div class="preview-label">当前本地配置</div>
-            <div class="config-path" id="configPath">config: 未加载</div>
-            <div class="inline-note">
-              图片目录默认是 <code>public/images</code>，写回 Markdown 时会自动换成相对当前文章的路径。
-            </div>
+          <div class="preview-card info-card">
+            <div class="preview-label">当前会自动处理</div>
+            <ul class="rule-list">
+              <li>首个 H1 自动写入 title，并从正文中删除</li>
+              <li>缺失 pubDate 自动补全，updatedDate 每次覆盖</li>
+              <li>本地图片复制到图片目录，引用统一改成 <code>/images/...</code></li>
+            </ul>
           </div>
         </section>
       </div>
 
-      <section class="panel config-panel">
-        <div class="panel-head">
-          <div>
-            <h2>本地配置</h2>
-            <p>这些设置会写入系统配置目录，托盘常驻后也会继续沿用。</p>
-          </div>
-        </div>
-
-        <div class="config-grid">
-          <label for="blogContentDir">blog 输出目录</label>
-          <input id="blogContentDir" type="text" placeholder="src/content/blog" />
-
-          <label for="essaysContentDir">essays 输出目录</label>
-          <input id="essaysContentDir" type="text" placeholder="src/content/essays" />
-
-          <label for="imagesDir">图片目录</label>
-          <input id="imagesDir" type="text" placeholder="public/images" />
-
-          <label for="dateFormat">日期格式</label>
-          <input id="dateFormat" type="text" placeholder="%Y-%m-%d" />
-
-          <label for="descriptionAutoLength">自动摘要长度</label>
-          <input id="descriptionAutoLength" type="number" min="1" step="1" placeholder="80" />
-
-          <label for="fileNameStrategy">文件名策略</label>
-          <select id="fileNameStrategy">
-            <option value="original">保留原文件名</option>
-            <option value="titleSlug">按标题 slug 生成</option>
-          </select>
-        </div>
-
-        <div class="toolbar">
-          <button id="saveConfig">保存本地配置</button>
-          <button id="resetConfig">恢复推荐配置</button>
-        </div>
-      </section>
-
       <section class="panel report-panel">
-        <div class="panel-head">
+        <div class="panel-head compact">
           <div>
             <h2>执行报告</h2>
-            <p>这里会显示解析告警、图片复制结果和最终输出路径。</p>
+            <p>显示解析警告、图片复制结果和最终输出路径，便于你直接检查这次转换。</p>
           </div>
         </div>
-        <pre id="report">等待操作…</pre>
+        <pre id="report">等待操作...</pre>
       </section>
+
+      <div class="modal-backdrop hidden" id="settingsModal" aria-hidden="true">
+        <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+          <div class="modal-head">
+            <div>
+              <div class="eyebrow">Local Config</div>
+              <h2 id="settingsTitle">设置</h2>
+              <p>这里保留本地仓库路径和转换策略。保存后会写入系统配置目录，下次打开仍会沿用。</p>
+            </div>
+            <button id="closeSettings" class="close-button" type="button" aria-label="关闭设置">
+              <span aria-hidden="true">×</span>
+            </button>
+          </div>
+
+          <div class="config-grid">
+            <label for="repoRoot">博客仓库根目录</label>
+            <div class="field-with-button">
+              <input id="repoRoot" type="text" placeholder="例如：C:\\Users\\admin\\work\\blog" />
+              <button id="pickRepoRoot" type="button">选择</button>
+            </div>
+
+            <label for="blogContentDir">blog 输出目录</label>
+            <input id="blogContentDir" type="text" placeholder="src/content/blog" />
+
+            <label for="essaysContentDir">essays 输出目录</label>
+            <input id="essaysContentDir" type="text" placeholder="src/content/essays" />
+
+            <label for="imagesDir">图片目录</label>
+            <input id="imagesDir" type="text" placeholder="public/images" />
+
+            <label for="dateFormat">日期格式</label>
+            <input id="dateFormat" type="text" placeholder="%Y-%m-%d" />
+
+            <label for="descriptionAutoLength">自动摘要长度</label>
+            <input id="descriptionAutoLength" type="number" min="1" step="1" placeholder="80" />
+
+            <label for="fileNameStrategy">文件名策略</label>
+            <select id="fileNameStrategy">
+              <option value="original">保留原文件名</option>
+              <option value="titleSlug">按标题 slug 生成</option>
+            </select>
+          </div>
+
+          <div class="modal-foot">
+            <div class="config-path" id="configPath">config: 未加载</div>
+            <div class="toolbar compact">
+              <button id="resetConfig" type="button">恢复推荐配置</button>
+              <button id="saveConfig" type="button" class="primary">保存设置</button>
+            </div>
+          </div>
+        </section>
+      </div>
     </div>
   `;
 }
@@ -264,7 +307,7 @@ function collectConfigFromForm(): AppConfig {
   const descriptionAutoLength = Number.parseInt(descriptionAutoLengthRaw || "0", 10);
 
   if (!Number.isFinite(descriptionAutoLength) || descriptionAutoLength <= 0) {
-    throw new Error("自动摘要长度必须是大于 0 的整数");
+    throw new Error("自动摘要长度必须是大于 0 的整数。");
   }
 
   const fileNameStrategyValue = getEl<HTMLSelectElement>("#fileNameStrategy").value;
@@ -301,7 +344,7 @@ function setImagePill(counts?: AnalyzeResult["imageCounts"]) {
 }
 
 function reportText(text: string) {
-  getEl<HTMLPreElement>("#report").textContent = text.trim() ? text : "等待操作…";
+  getEl<HTMLPreElement>("#report").textContent = text.trim() ? text : "等待操作...";
 }
 
 function updateTagsVisibility() {
@@ -312,7 +355,11 @@ function updateTagsVisibility() {
 
 function syncOverrideState() {
   getEl<HTMLTextAreaElement>("#descInput").disabled = !getEl<HTMLInputElement>("#descOverride").checked;
-  getEl<HTMLInputElement>("#tagsInput").disabled = !getEl<HTMLInputElement>("#tagsOverride").checked;
+
+  const tagsEnabled = getEl<HTMLInputElement>("#tagsOverride").checked;
+  getEl<HTMLInputElement>("#tagInput").disabled = !tagsEnabled;
+  getEl<HTMLButtonElement>("#addTag").disabled = !tagsEnabled;
+  getEl<HTMLDivElement>("#tagEditor").classList.toggle("disabled", !tagsEnabled);
 
   const heroEnabled = getEl<HTMLInputElement>("#heroOverride").checked;
   getEl<HTMLInputElement>("#heroPath").disabled = !heroEnabled;
@@ -352,8 +399,7 @@ function setConvertButtonPhase(phase: ActionPhase) {
   }
 
   button.disabled = false;
-  button.textContent =
-    phase === "success" ? "转换完成" : phase === "error" ? "转换失败" : "开始转换";
+  button.textContent = phase === "success" ? "转换完成" : phase === "error" ? "转换失败" : "开始转换";
 
   if (phase !== "idle") {
     state.convertResetTimer = window.setTimeout(() => {
@@ -363,6 +409,62 @@ function setConvertButtonPhase(phase: ActionPhase) {
       state.convertResetTimer = null;
     }, 1600);
   }
+}
+
+function setSettingsOpen(open: boolean) {
+  const modal = getEl<HTMLDivElement>("#settingsModal");
+  modal.classList.toggle("hidden", !open);
+  modal.setAttribute("aria-hidden", String(!open));
+  document.body.classList.toggle("modal-open", open);
+
+  if (open) {
+    getEl<HTMLInputElement>("#repoRoot").focus();
+  }
+}
+
+function normalizeTagParts(raw: string) {
+  return raw
+    .split(/[,\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function addTags(raw: string) {
+  const nextTags = normalizeTagParts(raw);
+  if (!nextTags.length) return;
+
+  for (const tag of nextTags) {
+    if (!state.tags.some((existing) => existing.toLowerCase() === tag.toLowerCase())) {
+      state.tags.push(tag);
+    }
+  }
+
+  getEl<HTMLInputElement>("#tagInput").value = "";
+  renderTags();
+}
+
+function removeTag(index: number) {
+  state.tags.splice(index, 1);
+  renderTags();
+}
+
+function renderTags() {
+  const list = getEl<HTMLDivElement>("#tagList");
+  if (!state.tags.length) {
+    list.innerHTML = '<span class="tag-placeholder">还没有添加 tag</span>';
+    return;
+  }
+
+  list.innerHTML = state.tags
+    .map(
+      (tag, index) => `
+        <span class="tag-chip">
+          <span>${escapeHtml(tag)}</span>
+          <button type="button" class="tag-remove" data-tag-index="${index}" aria-label="删除 tag">×</button>
+        </span>
+      `,
+    )
+    .join("");
 }
 
 async function loadConfig() {
@@ -381,7 +483,9 @@ async function saveConfig() {
   getEl<HTMLDivElement>("#configPath").textContent = envelope.configPath
     ? `config: ${envelope.configPath}`
     : "config: 未找到配置文件";
-  setStatus("ok", "本地配置已保存");
+  setStatus("ok", "设置已保存");
+  setSettingsOpen(false);
+  await analyze();
 }
 
 async function analyze() {
@@ -403,7 +507,7 @@ async function analyze() {
     })) as AnalyzeResult;
 
     state.lastAnalyze = result;
-    setStatus(result.warnings.length ? "warn" : "ok", result.warnings.length ? "解析完成，有告警" : "解析完成");
+    setStatus(result.warnings.length ? "warn" : "ok", result.warnings.length ? "解析完成，有警告" : "解析完成");
     setImagePill(result.imageCounts);
     setPreview(result);
 
@@ -429,17 +533,9 @@ async function convert() {
     return;
   }
 
-  const tags =
-    getOutputType() === "blog" && getEl<HTMLInputElement>("#tagsOverride").checked
-      ? getEl<HTMLInputElement>("#tagsInput")
-          .value.split(",")
-          .map((item) => item.trim())
-          .filter(Boolean)
-      : [];
-
   try {
     setConvertButtonPhase("loading");
-    setStatus("idle", "已触发转换，正在处理中");
+    setStatus("idle", "已触发转换，正在处理...");
 
     const config = collectConfigFromForm();
     const result = (await invoke("convert_markdown", {
@@ -451,7 +547,7 @@ async function convert() {
           descriptionOverride: getEl<HTMLInputElement>("#descOverride").checked,
           description: getEl<HTMLTextAreaElement>("#descInput").value,
           tagsOverride: getEl<HTMLInputElement>("#tagsOverride").checked,
-          tags,
+          tags: getOutputType() === "blog" ? state.tags : [],
           heroImageOverride: getEl<HTMLInputElement>("#heroOverride").checked,
           heroImagePath: getEl<HTMLInputElement>("#heroPath").value.trim() || null,
         },
@@ -473,7 +569,7 @@ async function convert() {
     }
 
     setConvertButtonPhase(result.warnings.length ? "error" : "success");
-    setStatus(result.warnings.length ? "warn" : "ok", result.warnings.length ? "转换完成，有告警" : "转换完成");
+    setStatus(result.warnings.length ? "warn" : "ok", result.warnings.length ? "转换完成，有警告" : "转换完成");
     reportText(lines.join("\n"));
     await analyze();
   } catch (error) {
@@ -484,9 +580,8 @@ async function convert() {
 }
 
 function resetConfigDraft() {
-  const repoRoot = getEl<HTMLInputElement>("#repoRoot").value.trim();
-  applyConfigToForm({ ...DEFAULT_CONFIG, repoRoot });
-  setStatus("idle", "已恢复推荐配置，点击保存后生效");
+  applyConfigToForm(DEFAULT_CONFIG);
+  setStatus("idle", "已恢复推荐配置，保存后生效");
 }
 
 async function copyReport() {
@@ -498,11 +593,6 @@ async function copyReport() {
 
   await navigator.clipboard.writeText(text);
   setStatus("ok", "报告已复制");
-}
-
-async function hideToTray() {
-  await trayWindow.hide();
-  setStatus("ok", "窗口已隐藏到系统托盘");
 }
 
 async function pickDirectory(inputSelector: string, title: string) {
@@ -541,20 +631,34 @@ async function pickHeroImage() {
 
 const app = getEl<HTMLDivElement>("#app");
 render(app);
+renderTags();
 updateTagsVisibility();
 syncOverrideState();
 setConvertButtonPhase("idle");
 
-getEl<HTMLButtonElement>("#pickRepoRoot").addEventListener("click", async () => {
-  await pickDirectory("#repoRoot", "选择博客仓库根目录");
-  await analyze();
+getEl<HTMLButtonElement>("#openSettings").addEventListener("click", () => setSettingsOpen(true));
+getEl<HTMLButtonElement>("#closeSettings").addEventListener("click", () => setSettingsOpen(false));
+getEl<HTMLDivElement>("#settingsModal").addEventListener("click", (event) => {
+  if (event.target === event.currentTarget) {
+    setSettingsOpen(false);
+  }
 });
 
-getEl<HTMLButtonElement>("#pickMd").addEventListener("click", pickMarkdown);
-getEl<HTMLButtonElement>("#pickHero").addEventListener("click", pickHeroImage);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    setSettingsOpen(false);
+  }
+});
+
+getEl<HTMLButtonElement>("#pickRepoRoot").addEventListener("click", async () => {
+  await pickDirectory("#repoRoot", "选择博客仓库根目录");
+});
+
+getEl<HTMLButtonElement>("#pickMd").addEventListener("click", () => void pickMarkdown());
+getEl<HTMLButtonElement>("#pickHero").addEventListener("click", () => void pickHeroImage());
 getEl<HTMLButtonElement>("#saveConfig").addEventListener("click", () =>
   void saveConfig().catch((error) => {
-    setStatus("error", "保存配置失败");
+    setStatus("error", "保存设置失败");
     reportText(String(error));
   }),
 );
@@ -567,14 +671,10 @@ getEl<HTMLButtonElement>("#copyReport").addEventListener("click", () =>
     reportText(String(error));
   }),
 );
-getEl<HTMLButtonElement>("#hideToTray").addEventListener("click", () =>
-  void hideToTray().catch((error) => {
-    setStatus("error", "隐藏到托盘失败");
-    reportText(String(error));
-  }),
-);
 
-getEl<HTMLInputElement>("#repoRoot").addEventListener("change", () => void analyze());
+getEl<HTMLInputElement>("#repoRoot").addEventListener("change", () => {
+  setStatus("idle", "仓库路径已更新，保存后会写入本地配置");
+});
 getEl<HTMLInputElement>("#mdPath").addEventListener("change", () => void analyze());
 getEl<HTMLSelectElement>("#outputType").addEventListener("change", () => {
   updateTagsVisibility();
@@ -584,6 +684,28 @@ getEl<HTMLSelectElement>("#outputType").addEventListener("change", () => {
 getEl<HTMLInputElement>("#descOverride").addEventListener("change", syncOverrideState);
 getEl<HTMLInputElement>("#tagsOverride").addEventListener("change", syncOverrideState);
 getEl<HTMLInputElement>("#heroOverride").addEventListener("change", syncOverrideState);
+
+getEl<HTMLButtonElement>("#addTag").addEventListener("click", () => {
+  addTags(getEl<HTMLInputElement>("#tagInput").value);
+});
+
+getEl<HTMLInputElement>("#tagInput").addEventListener("keydown", (event) => {
+  if (event.key === "Enter" || event.key === ",") {
+    event.preventDefault();
+    addTags(getEl<HTMLInputElement>("#tagInput").value);
+  }
+});
+
+getEl<HTMLDivElement>("#tagList").addEventListener("click", (event) => {
+  const target = event.target as HTMLElement;
+  const button = target.closest<HTMLButtonElement>(".tag-remove");
+  if (!button) return;
+
+  const index = Number.parseInt(button.dataset.tagIndex || "", 10);
+  if (Number.isFinite(index)) {
+    removeTag(index);
+  }
+});
 
 loadConfig().catch((error) => {
   applyConfigToForm(DEFAULT_CONFIG);
