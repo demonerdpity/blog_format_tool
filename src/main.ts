@@ -48,6 +48,12 @@ type ConvertReport = {
   warnings: string[];
 };
 
+type AnalyzeOptions = {
+  preserveReport?: boolean;
+  preserveStatus?: boolean;
+  suppressOutputExistsPath?: string | null;
+};
+
 const DEFAULT_CONFIG: AppConfig = {
   repoRoot: "",
   blogContentDir: "src/content/blog",
@@ -388,6 +394,19 @@ function splitReportMessages(messages: string[]) {
   return { notices, warnings };
 }
 
+function outputExistsNotice(outputPath: string) {
+  return `目标文章已存在，本次转换会覆盖：${outputPath}`;
+}
+
+function filterAnalyzeMessages(messages: string[], suppressOutputExistsPath?: string | null) {
+  if (!suppressOutputExistsPath) {
+    return messages;
+  }
+
+  const suppressed = outputExistsNotice(suppressOutputExistsPath);
+  return messages.filter((message) => message !== suppressed);
+}
+
 function appendMessageSection(lines: string[], title: string, messages: string[]) {
   if (!messages.length) {
     return;
@@ -608,13 +627,17 @@ async function saveConfig() {
   }
 }
 
-async function analyze() {
-  reportText("");
+async function analyze(options: AnalyzeOptions = {}) {
+  if (!options.preserveReport) {
+    reportText("");
+  }
   const mdPath = getEl<HTMLInputElement>("#mdPath").value.trim();
 
   if (!mdPath) {
     state.lastAnalyze = null;
-    setStatus("idle", "请选择 Markdown 文件");
+    if (!options.preserveStatus) {
+      setStatus("idle", "请选择 Markdown 文件");
+    }
     setImagePill();
     setPreview(null);
     return;
@@ -629,29 +652,41 @@ async function analyze() {
 
   try {
     const config = collectConfigFromForm();
-    const result = (await invoke("analyze_markdown", {
+    const rawResult = (await invoke("analyze_markdown", {
       request: { mdPath, outputType: getOutputType(), config },
     })) as AnalyzeResult;
+    const result: AnalyzeResult = {
+      ...rawResult,
+      warnings: filterAnalyzeMessages(rawResult.warnings, options.suppressOutputExistsPath),
+    };
 
     state.lastAnalyze = result;
     const { notices, warnings } = splitReportMessages(result.warnings);
-    setStatus(
-      warnings.length ? "warn" : "ok",
-      warnings.length ? "解析完成，存在警告" : notices.length ? "解析完成，包含提示" : "解析完成",
-    );
+    if (!options.preserveStatus) {
+      setStatus(
+        warnings.length ? "warn" : "ok",
+        warnings.length ? "解析完成，存在警告" : notices.length ? "解析完成，包含提示" : "解析完成",
+      );
+    }
     setImagePill(result.imageCounts);
     setPreview(result);
 
-    const lines: string[] = [];
-    appendMessageSection(lines, "[Notes]", notices);
-    appendMessageSection(lines, "[Warnings]", warnings);
-    reportText(lines.join("\n"));
+    if (!options.preserveReport) {
+      const lines: string[] = [];
+      appendMessageSection(lines, "[Notes]", notices);
+      appendMessageSection(lines, "[Warnings]", warnings);
+      reportText(lines.join("\n"));
+    }
   } catch (error) {
     state.lastAnalyze = null;
-    setStatus("error", "解析失败");
     setImagePill();
     setPreview(null);
-    reportText(String(error));
+    if (!options.preserveStatus) {
+      setStatus("error", "解析失败");
+    }
+    if (!options.preserveReport) {
+      reportText(String(error));
+    }
   }
 }
 
@@ -708,7 +743,11 @@ async function convert() {
       warnings.length ? "转换完成，存在警告" : notices.length ? "转换完成，包含提示" : "转换完成",
     );
     reportText(lines.join("\n"));
-    await analyze();
+    await analyze({
+      preserveReport: true,
+      preserveStatus: true,
+      suppressOutputExistsPath: result.outputMarkdownPath,
+    });
   } catch (error) {
     setConvertButtonPhase("error");
     setStatus("error", "转换失败");
