@@ -257,16 +257,9 @@ fn duplicate_output_warning(output_md_path: &Path, source_md: &Path) -> Option<S
   }
 
   Some(format!(
-    "目标文章已存在，可能是重复文章：{}",
+    "目标文章已存在，本次转换会覆盖：{}",
     output_md_path.display()
   ))
-}
-
-fn ensure_output_target_available(output_md_path: &Path, source_md: &Path) -> AppResult<()> {
-  if let Some(message) = duplicate_output_warning(output_md_path, source_md) {
-    return Err(AppError::Message(message));
-  }
-  Ok(())
 }
 
 fn copy_or_reuse_image(dest_dir: &Path, src_abs: &Path) -> AppResult<ImageResolved> {
@@ -625,7 +618,6 @@ pub fn convert_file(
   let output_md_dir = output_md_path
     .parent()
     .ok_or_else(|| AppError::Message("无法读取输出 Markdown 所在目录".to_string()))?;
-  ensure_output_target_available(&output_md_path, &md_path)?;
 
   let pub_date_current = get_string(&fm, "pubDate");
   let should_set_pub = match pub_date_current.as_deref() {
@@ -677,6 +669,9 @@ pub fn convert_file(
   let images_target_dir = images_root.join(&safe_title);
 
   let mut warnings: Vec<String> = Vec::new();
+  if let Some(message) = duplicate_output_warning(&output_md_path, &md_path) {
+    warnings.push(message);
+  }
   let (rewritten_body, images_resolved, _) =
     process_images_in_body(&body_wo_h1, md_dir, output_md_dir, &images_target_dir, &mut warnings, true)?;
 
@@ -851,7 +846,7 @@ Hello.\n",
   }
 
   #[test]
-  fn convert_rejects_duplicate_output_path() {
+  fn convert_warns_and_overwrites_existing_output() -> AppResult<()> {
     let repo = tempfile::tempdir().expect("repo tempdir");
     let source = tempfile::tempdir().expect("source tempdir");
 
@@ -874,7 +869,11 @@ Hello.\n",
       hero_image_path: None,
     };
 
-    let error = convert_file(&md_path.to_string_lossy(), "blog", &config, &meta).expect_err("duplicate should fail");
-    assert!(error.to_string().contains("目标文章已存在"));
+    let report = convert_file(&md_path.to_string_lossy(), "blog", &config, &meta)?;
+    assert!(report.warnings.iter().any(|warning| warning.contains("本次转换会覆盖")));
+    let out_md = fs::read_to_string(&report.output_markdown_path)?;
+    assert!(out_md.contains("title: Same Name"));
+    assert!(out_md.contains("description: Body."));
+    Ok(())
   }
 }

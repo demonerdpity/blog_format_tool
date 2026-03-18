@@ -372,6 +372,37 @@ function reportText(text: string) {
   getEl<HTMLPreElement>("#report").textContent = text.trim() ? text : "等待操作...";
 }
 
+function splitReportMessages(messages: string[]) {
+  const notices: string[] = [];
+  const warnings: string[] = [];
+
+  for (const message of messages) {
+    if (message.startsWith("目标文章已存在，本次转换会覆盖：")) {
+      notices.push(message);
+      continue;
+    }
+
+    warnings.push(message);
+  }
+
+  return { notices, warnings };
+}
+
+function appendMessageSection(lines: string[], title: string, messages: string[]) {
+  if (!messages.length) {
+    return;
+  }
+
+  if (lines.length) {
+    lines.push("");
+  }
+
+  lines.push(title);
+  for (const message of messages) {
+    lines.push(`- ${message}`);
+  }
+}
+
 function updateTagsVisibility() {
   const isBlog = getOutputType() === "blog";
   getEl<HTMLDivElement>("#tagsRow").style.display = isBlog ? "grid" : "none";
@@ -603,13 +634,18 @@ async function analyze() {
     })) as AnalyzeResult;
 
     state.lastAnalyze = result;
-    setStatus(result.warnings.length ? "warn" : "ok", result.warnings.length ? "解析完成，存在警告" : "解析完成");
+    const { notices, warnings } = splitReportMessages(result.warnings);
+    setStatus(
+      warnings.length ? "warn" : "ok",
+      warnings.length ? "解析完成，存在警告" : notices.length ? "解析完成，包含提示" : "解析完成",
+    );
     setImagePill(result.imageCounts);
     setPreview(result);
 
-    if (result.warnings.length) {
-      reportText(["[Warnings]", ...result.warnings.map((warning) => `- ${warning}`)].join("\n"));
-    }
+    const lines: string[] = [];
+    appendMessageSection(lines, "[Notes]", notices);
+    appendMessageSection(lines, "[Warnings]", warnings);
+    reportText(lines.join("\n"));
   } catch (error) {
     state.lastAnalyze = null;
     setStatus("error", "解析失败");
@@ -655,6 +691,7 @@ async function convert() {
       },
     })) as ConvertReport;
 
+    const { notices, warnings } = splitReportMessages(result.warnings);
     const lines = [`[OK] 输出文件：${result.outputMarkdownPath}`];
     if (result.images.length) {
       lines.push("", `[Images] ${result.images.length}`);
@@ -662,15 +699,14 @@ async function convert() {
         lines.push(`- ${image.action}: ${image.sourcePath} -> ${image.finalSitePath}`);
       }
     }
-    if (result.warnings.length) {
-      lines.push("", "[Warnings]");
-      for (const warning of result.warnings) {
-        lines.push(`- ${warning}`);
-      }
-    }
+    appendMessageSection(lines, "[Notes]", notices);
+    appendMessageSection(lines, "[Warnings]", warnings);
 
     setConvertButtonPhase("success");
-    setStatus(result.warnings.length ? "warn" : "ok", result.warnings.length ? "转换完成，存在警告" : "转换完成");
+    setStatus(
+      warnings.length ? "warn" : "ok",
+      warnings.length ? "转换完成，存在警告" : notices.length ? "转换完成，包含提示" : "转换完成",
+    );
     reportText(lines.join("\n"));
     await analyze();
   } catch (error) {
