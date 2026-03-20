@@ -92,11 +92,26 @@ function render(app: HTMLElement) {
         <header class="topbar">
           <div class="brand">
             <div class="brand-mark" aria-hidden="true">
-              <span class="brand-shadow"></span>
-              <span class="brand-core"></span>
-              <span class="brand-ribbon ribbon-one"></span>
-              <span class="brand-ribbon ribbon-two"></span>
-              <span class="brand-ribbon ribbon-three"></span>
+              <svg class="brand-logo" viewBox="0 0 512 512" focusable="false" aria-hidden="true">
+                <defs>
+                  <linearGradient id="brandBg" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0" stop-color="#0EA5E9"></stop>
+                    <stop offset="0.55" stop-color="#3B82F6"></stop>
+                    <stop offset="1" stop-color="#8B5CF6"></stop>
+                  </linearGradient>
+                  <radialGradient id="brandShine" cx="0.18" cy="0.12" r="0.88">
+                    <stop offset="0" stop-color="white" stop-opacity="0.42"></stop>
+                    <stop offset="0.32" stop-color="white" stop-opacity="0.14"></stop>
+                    <stop offset="1" stop-color="white" stop-opacity="0"></stop>
+                  </radialGradient>
+                </defs>
+                <rect width="512" height="512" rx="128" fill="url(#brandBg)"></rect>
+                <rect width="512" height="512" rx="128" fill="url(#brandShine)"></rect>
+                <g stroke="white" stroke-width="88" stroke-linecap="round" stroke-linejoin="round" opacity="0.98">
+                  <path d="M212 118V412"></path>
+                  <circle cx="328" cy="312" r="124"></circle>
+                </g>
+              </svg>
             </div>
             <div class="brand-copy">
               <div class="brand-row">

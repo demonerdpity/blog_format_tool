@@ -156,50 +156,12 @@ code {
   flex: 0 0 40px;
 }
 
-.brand-shadow,
-.brand-core,
-.brand-ribbon {
-  position: absolute;
-  inset: 0;
-}
-
-.brand-shadow {
-  inset: 4px;
+.brand-logo {
+  width: 100%;
+  height: 100%;
+  display: block;
   border-radius: 14px;
-  background: rgba(29, 78, 216, 0.14);
-  filter: blur(8px);
-}
-
-.brand-core {
-  border-radius: 14px;
-  background: linear-gradient(145deg, #0f6ef8, #18a0b6);
   box-shadow: 0 12px 20px rgba(37, 99, 235, 0.18);
-}
-
-.brand-ribbon {
-  left: 8px;
-  right: 8px;
-  height: 7px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.94);
-}
-
-.ribbon-one {
-  top: 10px;
-}
-
-.ribbon-two {
-  top: 18px;
-  left: 11px;
-  right: 11px;
-  opacity: 0.94;
-}
-
-.ribbon-three {
-  top: 26px;
-  left: 14px;
-  right: 14px;
-  opacity: 0.88;
 }
 
 .brand-copy {
