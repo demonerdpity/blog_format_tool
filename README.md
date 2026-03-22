@@ -13,7 +13,7 @@
 
 - 读取并保留 YAML frontmatter 中的已有字段
 - 从正文首个 `# H1` 自动提取标题，并从正文中移除该 H1
-- `pubDate` 缺失或不可解析时自动补齐
+- `pubDate` 缺失时自动补齐（已填写时不会覆盖）
 - `updatedDate` 每次转换都会刷新
 - `description` 优先保留原值，也支持手动覆盖，缺失时从正文首段自动生成
 - `tags` 仅在 `blog` 模式写入，`essays` 模式会自动移除

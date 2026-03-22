@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Local, NaiveDate, NaiveDateTime};
+use chrono::Local;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use regex::Regex;
 use serde_yaml::{Mapping, Value};
@@ -46,12 +46,17 @@ fn frontmatter_key(key: &str) -> Value {
   Value::String(key.to_string())
 }
 
-fn get_string(fm: &Mapping, key: &str) -> Option<String> {
-  fm.get(&frontmatter_key(key)).and_then(|v| match v {
+fn value_to_string(value: &Value) -> Option<String> {
+  match value {
     Value::String(s) => Some(s.clone()),
     Value::Number(n) => Some(n.to_string()),
+    Value::Tagged(tagged) => value_to_string(&tagged.value),
     _ => None,
-  })
+  }
+}
+
+fn get_string(fm: &Mapping, key: &str) -> Option<String> {
+  fm.get(&frontmatter_key(key)).and_then(value_to_string)
 }
 
 fn set_string(fm: &mut Mapping, key: &str, value: String) {
@@ -60,13 +65,6 @@ fn set_string(fm: &mut Mapping, key: &str, value: String) {
 
 fn remove_key(fm: &mut Mapping, key: &str) {
   fm.remove(&frontmatter_key(key));
-}
-
-fn is_parseable_date(s: &str, date_format: &str) -> bool {
-  NaiveDate::parse_from_str(s, date_format).is_ok()
-    || DateTime::parse_from_rfc3339(s).is_ok()
-    || NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S").is_ok()
-    || NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M").is_ok()
 }
 
 fn parse_frontmatter_and_body(markdown: &str) -> AppResult<ParsedMarkdown> {
@@ -621,7 +619,7 @@ pub fn convert_file(
 
   let pub_date_current = get_string(&fm, "pubDate");
   let should_set_pub = match pub_date_current.as_deref() {
-    Some(s) if is_parseable_date(s, &config.date_format) => false,
+    Some(s) if !s.trim().is_empty() => false,
     _ => true,
   };
   if should_set_pub {
@@ -798,6 +796,47 @@ mod tests {
     let copied = repo.path().join("public/images/Hello-World/a.png");
     assert!(copied.exists());
 
+    Ok(())
+  }
+
+  #[test]
+  fn convert_preserves_existing_pubdate_when_present() -> AppResult<()> {
+    let repo = tempfile::tempdir().expect("repo tempdir");
+    let source = tempfile::tempdir().expect("source tempdir");
+
+    fs::create_dir_all(repo.path().join("src/content/blog")).expect("mkdir blog");
+    fs::create_dir_all(repo.path().join("public/images")).expect("mkdir images");
+
+    let md_path = source.path().join("post.md");
+    fs::write(
+      &md_path,
+      "---\n\
+pubDate: 2024/03/22\n\
+description: Desc\n\
+---\n\
+\n\
+# Title\n\
+\n\
+Body.\n",
+    )
+    .expect("write md");
+
+    let mut config = AppConfig::default();
+    config.repo_root = repo.path().to_string_lossy().to_string();
+
+    let meta = MetaOptions {
+      description_override: false,
+      description: String::new(),
+      tags_override: false,
+      tags: vec![],
+      hero_image_override: false,
+      hero_image_path: None,
+    };
+
+    let report = convert_file(&md_path.to_string_lossy(), "blog", &config, &meta)?;
+    let out_md = fs::read_to_string(&report.output_markdown_path)?;
+    let fm = parse_frontmatter(&out_md);
+    assert_eq!(get_string(&fm, "pubDate").as_deref(), Some("2024/03/22"));
     Ok(())
   }
 
