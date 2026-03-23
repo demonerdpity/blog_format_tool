@@ -552,6 +552,7 @@ pub fn analyze_file(md_path: &str, output_type_raw: &str, config: &AppConfig) ->
   };
   let safe_title = safe_url_segment(&title, 80);
   let output_md_path = compute_output_md_path(config, output_type, &md_path, &title)?;
+  let output_exists = output_md_path.exists();
   let output_md_dir = output_md_path
     .parent()
     .ok_or_else(|| AppError::Message("无法读取输出 Markdown 所在目录".to_string()))?;
@@ -578,6 +579,7 @@ pub fn analyze_file(md_path: &str, output_type_raw: &str, config: &AppConfig) ->
     safe_title: Some(safe_title),
     image_counts: counts,
     output_markdown_path: Some(output_md_path.to_string_lossy().to_string()),
+    output_exists,
     warnings,
   })
 }

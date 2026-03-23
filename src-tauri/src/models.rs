@@ -88,6 +88,7 @@ pub struct AnalyzeResult {
   pub safe_title: Option<String>,
   pub image_counts: ImageCounts,
   pub output_markdown_path: Option<String>,
+  pub output_exists: bool,
   pub warnings: Vec<String>,
 }
 

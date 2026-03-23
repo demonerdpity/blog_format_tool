@@ -34,6 +34,7 @@ type AnalyzeResult = {
     site: number;
   };
   outputMarkdownPath: string | null;
+  outputExists: boolean;
   warnings: string[];
 };
 
@@ -265,6 +266,55 @@ function render(app: HTMLElement) {
           </div>
           <pre id="report">等待操作...</pre>
         </section>
+
+        <div class="modal-backdrop hidden" id="importModal" aria-hidden="true">
+          <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="importTitle">
+            <div class="modal-head">
+              <div>
+                <div class="eyebrow">Import Preview</div>
+                <h2 id="importTitle">导入提示</h2>
+                <p id="importSubtitle">确认本次转换会覆盖还是新建，并检查关键参数。</p>
+              </div>
+              <button id="closeImport" class="close-button" type="button" aria-label="关闭导入提示">
+                <span aria-hidden="true">×</span>
+              </button>
+            </div>
+
+            <div class="status-row">
+              <span class="pill" id="importActionPill">等待解析</span>
+              <span class="pill" id="importStrategyPill">-</span>
+              <span class="pill" id="importMetaPill">-</span>
+            </div>
+
+            <div class="preview-card">
+              <div class="preview-label">源文件</div>
+              <div class="preview-value" id="importSourcePath">-</div>
+            </div>
+
+            <div class="preview-card">
+              <div class="preview-label">输出文件</div>
+              <div class="preview-value" id="importOutputPath">-</div>
+            </div>
+
+            <div class="preview-card">
+              <div class="preview-label">标题（首个 H1）</div>
+              <div class="preview-value" id="importDetectedTitle">-</div>
+            </div>
+
+            <div class="preview-card info-card">
+              <div class="preview-label">参数提醒</div>
+              <ul class="rule-list" id="importRules"></ul>
+            </div>
+
+            <div class="modal-foot">
+              <div class="config-path" id="importFootnote"></div>
+              <div class="toolbar compact">
+                <button id="importOpenSettings" type="button">打开设置</button>
+                <button id="confirmImport" type="button" class="primary">知道了</button>
+              </div>
+            </div>
+          </section>
+        </div>
 
         <div class="modal-backdrop hidden" id="settingsModal" aria-hidden="true">
           <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
@@ -501,7 +551,133 @@ function setConvertButtonPhase(phase: ActionPhase) {
   }
 }
 
+function outputTypeLabel(outputType: OutputType) {
+  return outputType === "blog" ? "blog" : "essays";
+}
+
+function fileNameStrategyLabel(strategy: AppConfig["fileNameStrategy"]) {
+  return strategy === "titleSlug" ? "标题 slug" : "原文件名";
+}
+
+function setImportModalOpen(openState: boolean) {
+  const modal = getEl<HTMLDivElement>("#importModal");
+  modal.classList.toggle("hidden", !openState);
+  modal.setAttribute("aria-hidden", String(!openState));
+  document.body.classList.toggle("modal-open", openState);
+
+  if (openState) {
+    getEl<HTMLButtonElement>("#confirmImport").focus();
+  }
+}
+
+function buildImportRules(result: AnalyzeResult, config: AppConfig, outputType: OutputType) {
+  const rules: string[] = [];
+
+  if (config.fileNameStrategy === "titleSlug") {
+    rules.push("文件名策略：按标题 slug 生成；后续如果改了 H1 标题，可能写入到新文件（看起来像新文章）。");
+  } else {
+    rules.push("文件名策略：保留原文件名；只要源文件名不变，输出文件名就不变（改标题仍会覆盖同一篇）。");
+  }
+
+  rules.push("updatedDate：每次转换都会刷新。");
+  rules.push("pubDate：仅在源文件缺失/为空时补齐（已有则保留）。");
+
+  const descOverride = getEl<HTMLInputElement>("#descOverride").checked;
+  const descText = getEl<HTMLTextAreaElement>("#descInput").value.trim();
+  if (!descOverride) {
+    rules.push("description：未勾选覆盖，优先保留源文件已有 description；缺失时自动生成。");
+  } else if (descText) {
+    rules.push("description：已勾选覆盖，将使用你输入的内容。");
+  } else {
+    rules.push("description：已勾选覆盖但为空，将自动从正文首段生成（长度受“自动摘要长度”影响）。");
+  }
+
+  if (outputType === "blog") {
+    const tagsOverride = getEl<HTMLInputElement>("#tagsOverride").checked;
+    if (!tagsOverride) {
+      rules.push("tags：未勾选写入，将保留源文件已有 tags；源文件缺失时保持缺失。");
+    } else if (state.tags.length) {
+      rules.push(`tags：已勾选写入，将写入当前 tag 列表（${state.tags.length} 个）。`);
+    } else {
+      rules.push("tags：已勾选写入但当前为空，将写入空 tags（会覆盖掉源文件 tags）。");
+    }
+  } else {
+    rules.push("tags：essays 模式会自动移除 tags。");
+  }
+
+  const heroOverride = getEl<HTMLInputElement>("#heroOverride").checked;
+  const heroPath = getEl<HTMLInputElement>("#heroPath").value.trim();
+  if (!heroOverride) {
+    rules.push("heroImage：未勾选覆盖，保持源文件已有 heroImage。");
+  } else if (heroPath) {
+    rules.push("heroImage：已勾选覆盖，将使用当前选择的路径（本地图片会复制并改写引用）。");
+  } else {
+    rules.push("heroImage：已勾选覆盖但未选择图片，转换会失败。");
+  }
+
+  if (result.outputExists) {
+    rules.push("目标文件已存在：转换会直接覆盖同名输出文件。");
+  } else {
+    rules.push("目标文件不存在：转换会新建输出文件。");
+  }
+
+  return rules;
+}
+
+function showImportHintModal() {
+  const mdPath = getEl<HTMLInputElement>("#mdPath").value.trim();
+  const result = state.lastAnalyze;
+  if (!mdPath || !result) {
+    return;
+  }
+
+  const config = collectConfigFromForm();
+  const outputType = getOutputType();
+
+  const subtitleEl = getEl<HTMLParagraphElement>("#importSubtitle");
+  subtitleEl.textContent = result.outputExists
+    ? "检测到目标文章已存在：继续转换会覆盖同名输出文件。"
+    : "目标文章不存在：继续转换会新建一个输出文件。";
+
+  const actionPill = getEl<HTMLSpanElement>("#importActionPill");
+  actionPill.className = `pill ${result.outputExists ? "warn" : "ok"}`;
+  actionPill.textContent = result.outputExists ? "将覆盖已有文章" : "将新建文章";
+
+  const strategyPill = getEl<HTMLSpanElement>("#importStrategyPill");
+  strategyPill.className = "pill";
+  strategyPill.textContent = `输出：${outputTypeLabel(outputType)} · 文件名：${fileNameStrategyLabel(config.fileNameStrategy)}`;
+
+  const descOverride = getEl<HTMLInputElement>("#descOverride").checked;
+  const tagsOverride = outputType === "blog" ? getEl<HTMLInputElement>("#tagsOverride").checked : false;
+  const heroOverride = getEl<HTMLInputElement>("#heroOverride").checked;
+  const metaPill = getEl<HTMLSpanElement>("#importMetaPill");
+  metaPill.className = "pill";
+  metaPill.textContent =
+    outputType === "blog"
+      ? `覆盖：description ${descOverride ? "是" : "否"} · tags ${tagsOverride ? "是" : "否"} · heroImage ${heroOverride ? "是" : "否"}`
+      : `覆盖：description ${descOverride ? "是" : "否"} · tags（移除） · heroImage ${heroOverride ? "是" : "否"}`;
+
+  getEl<HTMLDivElement>("#importSourcePath").innerHTML = `<code>${escapeHtml(mdPath)}</code>`;
+  getEl<HTMLDivElement>("#importOutputPath").innerHTML = result.outputMarkdownPath
+    ? `<code>${escapeHtml(result.outputMarkdownPath)}</code>`
+    : '<span class="muted">尚未生成输出路径</span>';
+  getEl<HTMLDivElement>("#importDetectedTitle").innerHTML = result.title
+    ? escapeHtml(result.title)
+    : '<span class="muted">缺少标题</span>';
+
+  const rules = buildImportRules(result, config, outputType);
+  getEl<HTMLUListElement>("#importRules").innerHTML = rules.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
+
+  getEl<HTMLDivElement>("#importFootnote").textContent =
+    "想改变“覆盖/新建”的结果：调整输出类型、文件名策略，或修改标题/源文件名。";
+
+  setImportModalOpen(true);
+}
+
 function setSettingsOpen(openState: boolean) {
+  if (openState) {
+    setImportModalOpen(false);
+  }
   const modal = getEl<HTMLDivElement>("#settingsModal");
   modal.classList.toggle("hidden", !openState);
   modal.setAttribute("aria-hidden", String(!openState));
@@ -556,6 +732,7 @@ async function handleDroppedPaths(paths: string[]) {
   getEl<HTMLInputElement>("#mdPath").value = markdownPath;
   setStatus("ok", "已读取拖入的 Markdown 文件");
   await analyze();
+  showImportHintModal();
 }
 
 function normalizeTagParts(raw: string) {
@@ -805,6 +982,7 @@ async function pickMarkdown() {
   if (typeof selected === "string") {
     getEl<HTMLInputElement>("#mdPath").value = selected;
     await analyze();
+    showImportHintModal();
   }
 }
 
@@ -837,8 +1015,15 @@ getEl<HTMLDivElement>("#settingsModal").addEventListener("click", (event) => {
   }
 });
 
+getEl<HTMLDivElement>("#importModal").addEventListener("click", (event) => {
+  if (event.target === event.currentTarget) {
+    setImportModalOpen(false);
+  }
+});
+
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
+    setImportModalOpen(false);
     setSettingsOpen(false);
   }
 });
@@ -850,6 +1035,9 @@ getEl<HTMLButtonElement>("#pickRepoRoot").addEventListener("click", async () => 
 
 getEl<HTMLButtonElement>("#pickMd").addEventListener("click", () => void pickMarkdown());
 getEl<HTMLButtonElement>("#pickHero").addEventListener("click", () => void pickHeroImage());
+getEl<HTMLButtonElement>("#closeImport").addEventListener("click", () => setImportModalOpen(false));
+getEl<HTMLButtonElement>("#confirmImport").addEventListener("click", () => setImportModalOpen(false));
+getEl<HTMLButtonElement>("#importOpenSettings").addEventListener("click", () => setSettingsOpen(true));
 getEl<HTMLButtonElement>("#saveConfig").addEventListener("click", () =>
   void saveConfig().catch((error) => {
     setStatus("error", "保存设置失败");
