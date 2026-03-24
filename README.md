@@ -17,6 +17,7 @@
 - `updatedDate` 每次转换都会刷新
 - `description` 优先保留原值，也支持手动覆盖，缺失时从正文首段自动生成
 - `tags` 仅在 `blog` 模式写入，`essays` 模式会自动移除
+- 检测到目标文章已存在（更新）时，`description` / `tags` 可选择：保持原样、重新写、只添加（追加并去重 / 仅在缺失时补齐）
 - `tags` 支持逐个添加，界面会以 tag chip 的形式展示和删除
 - `heroImage` 支持单独选择，并按同样规则复制、改写路径
 - 本地图片会复制到 `<repoRoot>/public/images/<safeTitle>/`

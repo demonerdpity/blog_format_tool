@@ -92,12 +92,20 @@ pub struct AnalyzeResult {
   pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum MetaWriteMode {
+  Keep,
+  Rewrite,
+  Add,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MetaOptions {
-  pub description_override: bool,
+  pub description_mode: MetaWriteMode,
   pub description: String,
-  pub tags_override: bool,
+  pub tags_mode: MetaWriteMode,
   pub tags: Vec<String>,
   pub hero_image_override: bool,
   pub hero_image_path: Option<String>,

@@ -6,6 +6,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 type OutputType = "blog" | "essays";
 type StatusKind = "idle" | "ok" | "warn" | "error";
 type ActionPhase = "idle" | "loading" | "success" | "error";
+type MetaWriteMode = "keep" | "rewrite" | "add";
 
 type AppConfig = {
   repoRoot: string;
@@ -179,9 +180,18 @@ function render(app: HTMLElement) {
                 <option value="essays">随笔（essays）</option>
               </select>
 
-              <label for="descInput">覆盖 description</label>
+              <label id="descLabel" for="descInput">覆盖 description</label>
               <div class="stack-field">
-                <label class="checkbox-line">
+                <div id="descModeRow" class="hidden">
+                  <label for="descMode">更新策略</label>
+                  <select id="descMode">
+                    <option value="keep">保持原样（推荐）</option>
+                    <option value="rewrite">重新写</option>
+                    <option value="add">只添加（缺失时补齐）</option>
+                  </select>
+                </div>
+
+                <label class="checkbox-line" id="descOverrideRow">
                   <input id="descOverride" type="checkbox" />
                   <span>勾选后使用手动输入；不勾选时优先保留原 description，缺失时自动生成。</span>
                 </label>
@@ -190,7 +200,16 @@ function render(app: HTMLElement) {
 
               <label id="tagsLabel" for="tagInput">写入 tags</label>
               <div class="stack-field" id="tagsRow">
-                <label class="checkbox-line">
+                <div id="tagsModeRow" class="hidden">
+                  <label for="tagsMode">更新策略</label>
+                  <select id="tagsMode">
+                    <option value="keep">保持原样（推荐）</option>
+                    <option value="rewrite">重新写</option>
+                    <option value="add">只添加（追加并去重）</option>
+                  </select>
+                </div>
+
+                <label class="checkbox-line" id="tagsOverrideRow">
                   <input id="tagsOverride" type="checkbox" />
                   <span>仅 blog 模式可用。输入单个 tag 后点击加号或回车，下方会保留当前所有标签。</span>
                 </label>
@@ -493,10 +512,32 @@ function updateTagsVisibility() {
   getEl<HTMLLabelElement>("#tagsLabel").style.display = isBlog ? "block" : "none";
 }
 
-function syncOverrideState() {
-  getEl<HTMLTextAreaElement>("#descInput").disabled = !getEl<HTMLInputElement>("#descOverride").checked;
+function syncUpdateModeUI() {
+  const isUpdate = isUpdateMode();
 
-  const tagsEnabled = getEl<HTMLInputElement>("#tagsOverride").checked;
+  getEl<HTMLDivElement>("#descModeRow").classList.toggle("hidden", !isUpdate);
+  getEl<HTMLLabelElement>("#descOverrideRow").classList.toggle("hidden", isUpdate);
+  getEl<HTMLDivElement>("#tagsModeRow").classList.toggle("hidden", !isUpdate);
+  getEl<HTMLLabelElement>("#tagsOverrideRow").classList.toggle("hidden", isUpdate);
+
+  getEl<HTMLLabelElement>("#descLabel").textContent = isUpdate ? "更新 description" : "覆盖 description";
+  getEl<HTMLLabelElement>("#tagsLabel").textContent = isUpdate ? "更新 tags" : "写入 tags";
+}
+
+function syncOverrideState() {
+  const isUpdate = isUpdateMode();
+
+  const descEnabled = isUpdate
+    ? (getEl<HTMLSelectElement>("#descMode").value as MetaWriteMode) !== "keep"
+    : getEl<HTMLInputElement>("#descOverride").checked;
+  getEl<HTMLTextAreaElement>("#descInput").disabled = !descEnabled;
+
+  const tagsEnabled =
+    getOutputType() === "blog"
+      ? isUpdate
+        ? (getEl<HTMLSelectElement>("#tagsMode").value as MetaWriteMode) !== "keep"
+        : getEl<HTMLInputElement>("#tagsOverride").checked
+      : false;
   getEl<HTMLInputElement>("#tagInput").disabled = !tagsEnabled;
   getEl<HTMLButtonElement>("#addTag").disabled = !tagsEnabled;
   getEl<HTMLDivElement>("#tagEditor").classList.toggle("disabled", !tagsEnabled);
@@ -570,6 +611,33 @@ function setImportModalOpen(openState: boolean) {
   }
 }
 
+function isUpdateMode(result: AnalyzeResult | null = state.lastAnalyze) {
+  return Boolean(result?.outputExists);
+}
+
+function modeLabel(mode: MetaWriteMode) {
+  if (mode === "keep") return "保持原样";
+  if (mode === "rewrite") return "重新写";
+  return "只添加";
+}
+
+function getDescriptionMode(result: AnalyzeResult | null): MetaWriteMode {
+  if (isUpdateMode(result)) {
+    return getEl<HTMLSelectElement>("#descMode").value as MetaWriteMode;
+  }
+  return getEl<HTMLInputElement>("#descOverride").checked ? "rewrite" : "add";
+}
+
+function getTagsMode(result: AnalyzeResult | null, outputType: OutputType): MetaWriteMode {
+  if (outputType !== "blog") {
+    return "keep";
+  }
+  if (isUpdateMode(result)) {
+    return getEl<HTMLSelectElement>("#tagsMode").value as MetaWriteMode;
+  }
+  return getEl<HTMLInputElement>("#tagsOverride").checked ? "rewrite" : "keep";
+}
+
 function buildImportRules(result: AnalyzeResult, config: AppConfig, outputType: OutputType) {
   const rules: string[] = [];
 
@@ -580,26 +648,65 @@ function buildImportRules(result: AnalyzeResult, config: AppConfig, outputType: 
   }
 
   rules.push("updatedDate：每次转换都会刷新。");
-  rules.push("pubDate：仅在源文件缺失/为空时补齐（已有则保留）。");
+  rules.push("pubDate：仅在缺失/为空时补齐（已有则保留）。");
 
-  const descOverride = getEl<HTMLInputElement>("#descOverride").checked;
+  const descMode = getDescriptionMode(result);
   const descText = getEl<HTMLTextAreaElement>("#descInput").value.trim();
-  if (!descOverride) {
-    rules.push("description：未勾选覆盖，优先保留源文件已有 description；缺失时自动生成。");
-  } else if (descText) {
-    rules.push("description：已勾选覆盖，将使用你输入的内容。");
+  if (result.outputExists) {
+    if (descMode === "keep") {
+      rules.push("description：更新模式选择“保持原样”，将保留目标文章现有 description。");
+    } else if (descMode === "rewrite") {
+      rules.push(
+        descText
+          ? "description：更新模式选择“重新写”，将使用你输入的内容。"
+          : "description：更新模式选择“重新写”但为空，将自动从正文首段生成（长度受“自动摘要长度”影响）。",
+      );
+    } else {
+      rules.push(
+        descText
+          ? "description：更新模式选择“只添加”，仅当目标文章缺失 description 时使用你输入的内容。"
+          : "description：更新模式选择“只添加”且为空，仅当目标文章缺失 description 时才会自动生成摘要。",
+      );
+    }
   } else {
-    rules.push("description：已勾选覆盖但为空，将自动从正文首段生成（长度受“自动摘要长度”影响）。");
+    const descOverride = getEl<HTMLInputElement>("#descOverride").checked;
+    if (!descOverride) {
+      rules.push("description：未勾选覆盖，优先保留源文件已有 description；缺失时自动生成。");
+    } else if (descText) {
+      rules.push("description：已勾选覆盖，将使用你输入的内容。");
+    } else {
+      rules.push("description：已勾选覆盖但为空，将自动从正文首段生成（长度受“自动摘要长度”影响）。");
+    }
   }
 
   if (outputType === "blog") {
-    const tagsOverride = getEl<HTMLInputElement>("#tagsOverride").checked;
-    if (!tagsOverride) {
-      rules.push("tags：未勾选写入，将保留源文件已有 tags；源文件缺失时保持缺失。");
-    } else if (state.tags.length) {
-      rules.push(`tags：已勾选写入，将写入当前 tag 列表（${state.tags.length} 个）。`);
+    const tagsMode = getTagsMode(result, outputType);
+
+    if (result.outputExists) {
+      if (tagsMode === "keep") {
+        rules.push("tags：更新模式选择“保持原样”，将保留目标文章现有 tags。");
+      } else if (tagsMode === "rewrite") {
+        rules.push(
+          state.tags.length
+            ? `tags：更新模式选择“重新写”，将写入当前 tag 列表（${state.tags.length} 个）。`
+            : "tags：更新模式选择“重新写”但当前为空，将写入空 tags（会清空目标文章 tags）。",
+        );
+      } else {
+        rules.push(
+          state.tags.length
+            ? `tags：更新模式选择“只添加”，将把当前 tag 列表追加到目标文章 tags（${state.tags.length} 个，自动去重）。`
+            : "tags：更新模式选择“只添加”但当前为空，将不修改目标文章 tags。",
+        );
+      }
     } else {
-      rules.push("tags：已勾选写入但当前为空，将写入空 tags（会覆盖掉源文件 tags）。");
+      const tagsOverride = getEl<HTMLInputElement>("#tagsOverride").checked;
+      if (!tagsOverride) {
+        rules.push("tags：未勾选写入，将保留源文件已有 tags；源文件缺失时保持缺失。");
+      } else if (state.tags.length) {
+        rules.push(`tags：已勾选写入，将写入当前 tag 列表（${state.tags.length} 个）。`);
+      } else {
+        rules.push("tags：已勾选写入但当前为空，将写入空 tags（会覆盖掉源文件 tags）。");
+      }
     }
   } else {
     rules.push("tags：essays 模式会自动移除 tags。");
@@ -647,15 +754,25 @@ function showImportHintModal() {
   strategyPill.className = "pill";
   strategyPill.textContent = `输出：${outputTypeLabel(outputType)} · 文件名：${fileNameStrategyLabel(config.fileNameStrategy)}`;
 
-  const descOverride = getEl<HTMLInputElement>("#descOverride").checked;
-  const tagsOverride = outputType === "blog" ? getEl<HTMLInputElement>("#tagsOverride").checked : false;
   const heroOverride = getEl<HTMLInputElement>("#heroOverride").checked;
   const metaPill = getEl<HTMLSpanElement>("#importMetaPill");
   metaPill.className = "pill";
-  metaPill.textContent =
-    outputType === "blog"
-      ? `覆盖：description ${descOverride ? "是" : "否"} · tags ${tagsOverride ? "是" : "否"} · heroImage ${heroOverride ? "是" : "否"}`
-      : `覆盖：description ${descOverride ? "是" : "否"} · tags（移除） · heroImage ${heroOverride ? "是" : "否"}`;
+
+  if (result.outputExists) {
+    const descMode = getDescriptionMode(result);
+    const tagsMode = getTagsMode(result, outputType);
+    metaPill.textContent =
+      outputType === "blog"
+        ? `更新：description ${modeLabel(descMode)} · tags ${modeLabel(tagsMode)} · heroImage ${heroOverride ? "重新写" : "保持原样"}`
+        : `更新：description ${modeLabel(descMode)} · tags（移除） · heroImage ${heroOverride ? "重新写" : "保持原样"}`;
+  } else {
+    const descOverride = getEl<HTMLInputElement>("#descOverride").checked;
+    const tagsOverride = outputType === "blog" ? getEl<HTMLInputElement>("#tagsOverride").checked : false;
+    metaPill.textContent =
+      outputType === "blog"
+        ? `覆盖：description ${descOverride ? "是" : "否"} · tags ${tagsOverride ? "是" : "否"} · heroImage ${heroOverride ? "是" : "否"}`
+        : `覆盖：description ${descOverride ? "是" : "否"} · tags（移除） · heroImage ${heroOverride ? "是" : "否"}`;
+  }
 
   getEl<HTMLDivElement>("#importSourcePath").innerHTML = `<code>${escapeHtml(mdPath)}</code>`;
   getEl<HTMLDivElement>("#importOutputPath").innerHTML = result.outputMarkdownPath
@@ -832,6 +949,8 @@ async function analyze(options: AnalyzeOptions = {}) {
     }
     setImagePill();
     setPreview(null);
+    syncUpdateModeUI();
+    syncOverrideState();
     return;
   }
 
@@ -839,6 +958,8 @@ async function analyze(options: AnalyzeOptions = {}) {
     state.lastAnalyze = null;
     setImagePill();
     setPreview(null);
+    syncUpdateModeUI();
+    syncOverrideState();
     return;
   }
 
@@ -862,6 +983,8 @@ async function analyze(options: AnalyzeOptions = {}) {
     }
     setImagePill(result.imageCounts);
     setPreview(result);
+    syncUpdateModeUI();
+    syncOverrideState();
 
     if (!options.preserveReport) {
       const lines: string[] = [];
@@ -873,6 +996,8 @@ async function analyze(options: AnalyzeOptions = {}) {
     state.lastAnalyze = null;
     setImagePill();
     setPreview(null);
+    syncUpdateModeUI();
+    syncOverrideState();
     if (!options.preserveStatus) {
       setStatus("error", "解析失败");
     }
@@ -902,16 +1027,17 @@ async function convert() {
     setStatus("idle", "已触发转换，正在处理...");
 
     const config = collectConfigFromForm();
+    const outputType = getOutputType();
     const result = (await invoke("convert_markdown", {
       request: {
         mdPath,
-        outputType: getOutputType(),
+        outputType,
         config,
         meta: {
-          descriptionOverride: getEl<HTMLInputElement>("#descOverride").checked,
+          descriptionMode: getDescriptionMode(state.lastAnalyze),
           description: getEl<HTMLTextAreaElement>("#descInput").value,
-          tagsOverride: getEl<HTMLInputElement>("#tagsOverride").checked,
-          tags: getOutputType() === "blog" ? state.tags : [],
+          tagsMode: getTagsMode(state.lastAnalyze, outputType),
+          tags: outputType === "blog" ? state.tags : [],
           heroImageOverride: getEl<HTMLInputElement>("#heroOverride").checked,
           heroImagePath: getEl<HTMLInputElement>("#heroPath").value.trim() || null,
         },
@@ -1003,6 +1129,7 @@ const app = getEl<HTMLDivElement>("#app");
 render(app);
 renderTags();
 updateTagsVisibility();
+syncUpdateModeUI();
 syncOverrideState();
 setConvertButtonPhase("idle");
 
@@ -1070,6 +1197,8 @@ getEl<HTMLSelectElement>("#outputType").addEventListener("change", () => {
 getEl<HTMLInputElement>("#descOverride").addEventListener("change", syncOverrideState);
 getEl<HTMLInputElement>("#tagsOverride").addEventListener("change", syncOverrideState);
 getEl<HTMLInputElement>("#heroOverride").addEventListener("change", syncOverrideState);
+getEl<HTMLSelectElement>("#descMode").addEventListener("change", syncOverrideState);
+getEl<HTMLSelectElement>("#tagsMode").addEventListener("change", syncOverrideState);
 
 getEl<HTMLButtonElement>("#addTag").addEventListener("click", () => {
   addTags(getEl<HTMLInputElement>("#tagInput").value);

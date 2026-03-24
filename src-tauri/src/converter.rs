@@ -10,7 +10,8 @@ use sha2::{Digest, Sha256};
 
 use crate::error::{AppError, AppResult};
 use crate::models::{
-  AnalyzeResult, AppConfig, ConvertReport, FileNameStrategy, ImageCounts, ImageOp, MetaOptions, OutputType,
+  AnalyzeResult, AppConfig, ConvertReport, FileNameStrategy, ImageCounts, ImageOp, MetaOptions, MetaWriteMode,
+  OutputType,
 };
 use crate::utils::{
   is_remote_url, is_site_images_path, relative_markdown_path, resolve_under_repo, safe_file_name, safe_url_segment,
@@ -57,6 +58,39 @@ fn value_to_string(value: &Value) -> Option<String> {
 
 fn get_string(fm: &Mapping, key: &str) -> Option<String> {
   fm.get(&frontmatter_key(key)).and_then(value_to_string)
+}
+
+fn value_to_string_list(value: &Value) -> Vec<String> {
+  match value {
+    Value::Sequence(seq) => seq.iter().filter_map(value_to_string).collect(),
+    Value::String(s) => vec![s.clone()],
+    Value::Tagged(tagged) => value_to_string_list(&tagged.value),
+    _ => Vec::new(),
+  }
+}
+
+fn get_string_list(fm: &Mapping, key: &str) -> Vec<String> {
+  fm.get(&frontmatter_key(key))
+    .map(value_to_string_list)
+    .unwrap_or_default()
+}
+
+fn normalize_tag_list(tags: &[String]) -> Vec<String> {
+  let mut out: Vec<String> = Vec::new();
+  for tag in tags {
+    let trimmed = tag.trim();
+    if trimmed.is_empty() {
+      continue;
+    }
+    if out
+      .iter()
+      .any(|existing| existing.trim().eq_ignore_ascii_case(trimmed))
+    {
+      continue;
+    }
+    out.push(trimmed.to_string());
+  }
+  out
 }
 
 fn set_string(fm: &mut Mapping, key: &str, value: String) {
@@ -597,11 +631,11 @@ pub fn convert_file(
     .ok_or_else(|| AppError::Message("无法读取 Markdown 所在目录".to_string()))?;
 
   let markdown = fs::read_to_string(&md_path)?;
-  let parsed = parse_frontmatter_and_body(&markdown)?;
+  let parsed_source = parse_frontmatter_and_body(&markdown)?;
 
-  let (derived_title, body_wo_h1) = extract_title_from_first_h1(&parsed.body);
-  let mut fm = parsed.frontmatter;
-  let title = derived_title.or_else(|| get_string(&fm, "title"));
+  let (derived_title, body_wo_h1) = extract_title_from_first_h1(&parsed_source.body);
+  let source_frontmatter = parsed_source.frontmatter;
+  let title = derived_title.or_else(|| get_string(&source_frontmatter, "title"));
   let title = match title {
     Some(t) if !t.trim().is_empty() => t,
     _ => {
@@ -610,14 +644,32 @@ pub fn convert_file(
       ))
     }
   };
-  set_string(&mut fm, "title", title.clone());
 
   let safe_title = safe_url_segment(&title, 80);
   let today = now_date_string(&config.date_format);
   let output_md_path = compute_output_md_path(config, output_type, &md_path, &title)?;
+  let output_exists = output_md_path.exists();
   let output_md_dir = output_md_path
     .parent()
     .ok_or_else(|| AppError::Message("无法读取输出 Markdown 所在目录".to_string()))?;
+
+  let mut fm = if output_exists {
+    let existing_markdown = fs::read_to_string(&output_md_path)?;
+    let parsed_existing = parse_frontmatter_and_body(&existing_markdown)?;
+    parsed_existing.frontmatter
+  } else {
+    source_frontmatter.clone()
+  };
+
+  if output_exists {
+    for (key, value) in source_frontmatter {
+      if !fm.contains_key(&key) {
+        fm.insert(key, value);
+      }
+    }
+  }
+
+  set_string(&mut fm, "title", title.clone());
 
   let pub_date_current = get_string(&fm, "pubDate");
   let should_set_pub = match pub_date_current.as_deref() {
@@ -631,13 +683,25 @@ pub fn convert_file(
   set_string(&mut fm, "updatedDate", today.clone());
 
   let existing_desc = get_string(&fm, "description").unwrap_or_default();
-  let desc = if !meta.description_override && !existing_desc.trim().is_empty() {
-    existing_desc
-  } else if meta.description_override && !meta.description.trim().is_empty() {
-    meta.description.trim().to_string()
-  } else {
-    let auto = first_paragraph_plain_text(&body_wo_h1);
-    truncate_chars(&auto, config.description_auto_length)
+  let new_desc = || {
+    if !meta.description.trim().is_empty() {
+      meta.description.trim().to_string()
+    } else {
+      let auto = first_paragraph_plain_text(&body_wo_h1);
+      truncate_chars(&auto, config.description_auto_length)
+    }
+  };
+
+  let desc = match meta.description_mode {
+    MetaWriteMode::Keep => existing_desc,
+    MetaWriteMode::Add => {
+      if !existing_desc.trim().is_empty() {
+        existing_desc
+      } else {
+        new_desc()
+      }
+    }
+    MetaWriteMode::Rewrite => new_desc(),
   };
   if desc.trim().is_empty() {
     return Err(AppError::Message(
@@ -648,15 +712,34 @@ pub fn convert_file(
 
   match output_type {
     OutputType::Blog => {
-      if meta.tags_override {
-        let tags: Vec<Value> = meta
-          .tags
-          .iter()
-          .map(|t| t.trim())
-          .filter(|t| !t.is_empty())
-          .map(|t| Value::String(t.to_string()))
-          .collect();
-        fm.insert(frontmatter_key("tags"), Value::Sequence(tags));
+      match meta.tags_mode {
+        MetaWriteMode::Keep => {}
+        MetaWriteMode::Rewrite => {
+          let tags = normalize_tag_list(&meta.tags);
+          let tags: Vec<Value> = tags.into_iter().map(Value::String).collect();
+          fm.insert(frontmatter_key("tags"), Value::Sequence(tags));
+        }
+        MetaWriteMode::Add => {
+          let incoming = normalize_tag_list(&meta.tags);
+          if incoming.is_empty() {
+            // Keep original tags as-is when there's nothing to add.
+          } else {
+            let existing_tags = normalize_tag_list(&get_string_list(&fm, "tags"));
+            let mut merged = existing_tags;
+            for tag in incoming {
+              if merged
+                .iter()
+                .any(|existing| existing.trim().eq_ignore_ascii_case(tag.trim()))
+              {
+                continue;
+              }
+              merged.push(tag);
+            }
+
+            let tags: Vec<Value> = merged.into_iter().map(Value::String).collect();
+            fm.insert(frontmatter_key("tags"), Value::Sequence(tags));
+          }
+        }
       }
     }
     OutputType::Essays => {
@@ -773,9 +856,9 @@ mod tests {
     config.repo_root = repo.path().to_string_lossy().to_string();
 
     let meta = MetaOptions {
-      description_override: false,
+      description_mode: MetaWriteMode::Add,
       description: String::new(),
-      tags_override: false,
+      tags_mode: MetaWriteMode::Keep,
       tags: vec![],
       hero_image_override: false,
       hero_image_path: None,
@@ -827,9 +910,9 @@ Body.\n",
     config.repo_root = repo.path().to_string_lossy().to_string();
 
     let meta = MetaOptions {
-      description_override: false,
+      description_mode: MetaWriteMode::Add,
       description: String::new(),
-      tags_override: false,
+      tags_mode: MetaWriteMode::Keep,
       tags: vec![],
       hero_image_override: false,
       hero_image_path: None,
@@ -871,9 +954,9 @@ Hello.\n",
     config.repo_root = repo.path().to_string_lossy().to_string();
 
     let meta = MetaOptions {
-      description_override: false,
+      description_mode: MetaWriteMode::Add,
       description: String::new(),
-      tags_override: false,
+      tags_mode: MetaWriteMode::Keep,
       tags: vec![],
       hero_image_override: false,
       hero_image_path: None,
@@ -883,6 +966,111 @@ Hello.\n",
     let out_md = fs::read_to_string(&report.output_markdown_path)?;
     let fm = parse_frontmatter(&out_md);
     assert!(fm.get(&frontmatter_key("tags")).is_none());
+    Ok(())
+  }
+
+  #[test]
+  fn update_keeps_existing_description_and_tags_when_keep() -> AppResult<()> {
+    let repo = tempfile::tempdir().expect("repo tempdir");
+    let source = tempfile::tempdir().expect("source tempdir");
+
+    fs::create_dir_all(repo.path().join("src/content/blog")).expect("mkdir blog");
+    fs::create_dir_all(repo.path().join("public/images")).expect("mkdir images");
+
+    fs::write(
+      repo.path().join("src/content/blog/post.md"),
+      "---\n\
+title: Title\n\
+description: Existing desc\n\
+pubDate: 2024/03/22\n\
+tags:\n\
+  - old\n\
+  - keep\n\
+---\n\
+\n\
+Existing body.\n",
+    )
+    .expect("write existing post");
+
+    let md_path = source.path().join("post.md");
+    fs::write(&md_path, "# Title\n\nNew body.\n").expect("write md");
+
+    let mut config = AppConfig::default();
+    config.repo_root = repo.path().to_string_lossy().to_string();
+
+    let meta = MetaOptions {
+      description_mode: MetaWriteMode::Keep,
+      description: "new desc".to_string(),
+      tags_mode: MetaWriteMode::Keep,
+      tags: vec!["new".to_string()],
+      hero_image_override: false,
+      hero_image_path: None,
+    };
+
+    let report = convert_file(&md_path.to_string_lossy(), "blog", &config, &meta)?;
+    let out_md = fs::read_to_string(&report.output_markdown_path)?;
+    let fm = parse_frontmatter(&out_md);
+
+    assert_eq!(
+      get_string(&fm, "description").as_deref(),
+      Some("Existing desc")
+    );
+    assert_eq!(get_string(&fm, "pubDate").as_deref(), Some("2024/03/22"));
+    assert_eq!(
+      get_string_list(&fm, "tags"),
+      vec!["old".to_string(), "keep".to_string()]
+    );
+
+    Ok(())
+  }
+
+  #[test]
+  fn update_add_appends_tags() -> AppResult<()> {
+    let repo = tempfile::tempdir().expect("repo tempdir");
+    let source = tempfile::tempdir().expect("source tempdir");
+
+    fs::create_dir_all(repo.path().join("src/content/blog")).expect("mkdir blog");
+    fs::create_dir_all(repo.path().join("public/images")).expect("mkdir images");
+
+    fs::write(
+      repo.path().join("src/content/blog/post.md"),
+      "---\n\
+title: Title\n\
+description: Existing desc\n\
+pubDate: 2024/03/22\n\
+tags:\n\
+  - a\n\
+  - b\n\
+---\n\
+\n\
+Existing body.\n",
+    )
+    .expect("write existing post");
+
+    let md_path = source.path().join("post.md");
+    fs::write(&md_path, "# Title\n\nNew body.\n").expect("write md");
+
+    let mut config = AppConfig::default();
+    config.repo_root = repo.path().to_string_lossy().to_string();
+
+    let meta = MetaOptions {
+      description_mode: MetaWriteMode::Add,
+      description: String::new(),
+      tags_mode: MetaWriteMode::Add,
+      tags: vec!["b".to_string(), "c".to_string()],
+      hero_image_override: false,
+      hero_image_path: None,
+    };
+
+    let report = convert_file(&md_path.to_string_lossy(), "blog", &config, &meta)?;
+    let out_md = fs::read_to_string(&report.output_markdown_path)?;
+    let fm = parse_frontmatter(&out_md);
+
+    assert_eq!(
+      get_string_list(&fm, "tags"),
+      vec!["a".to_string(), "b".to_string(), "c".to_string()]
+    );
+
     Ok(())
   }
 
@@ -902,9 +1090,9 @@ Hello.\n",
     config.repo_root = repo.path().to_string_lossy().to_string();
 
     let meta = MetaOptions {
-      description_override: false,
+      description_mode: MetaWriteMode::Add,
       description: String::new(),
-      tags_override: false,
+      tags_mode: MetaWriteMode::Keep,
       tags: vec![],
       hero_image_override: false,
       hero_image_path: None,
